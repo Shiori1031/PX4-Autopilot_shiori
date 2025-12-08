@@ -44,6 +44,7 @@
 float PitchController::control_pitch(float pitch_setpoint, float euler_yaw_rate_setpoint, float roll, float pitch)
 {
 	/* Do not calculate control signal with bad inputs */
+	//防止非法输入导致控制器输崩溃，如果非法，返回上一次的有效值
 	if (!(PX4_ISFINITE(pitch_setpoint) &&
 	      PX4_ISFINITE(euler_yaw_rate_setpoint) &&
 	      PX4_ISFINITE(pitch) &&
@@ -51,14 +52,15 @@ float PitchController::control_pitch(float pitch_setpoint, float euler_yaw_rate_
 
 		return _body_rate_setpoint;
 	}
-
+	//俯仰误差计算 + 欧拉角速率计算 比例控制
 	const float pitch_error = pitch_setpoint - pitch;
 	_euler_rate_setpoint = pitch_error / _tc;
 
 	/* Transform setpoint to body angular rates (jacobian) */
+	//\therta、\phi、\psi  --> p,q,r
 	const float pitch_body_rate_setpoint_raw = cosf(roll) * _euler_rate_setpoint +
 			cosf(pitch) * sinf(roll) * euler_yaw_rate_setpoint;
-
+	//限幅
 	_body_rate_setpoint = math::constrain(pitch_body_rate_setpoint_raw, -_max_rate_neg, _max_rate_pos);
 
 	return _body_rate_setpoint;
