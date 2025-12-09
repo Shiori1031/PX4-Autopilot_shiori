@@ -39,6 +39,48 @@ using namespace matrix;
 using math::constrain;
 using math::radians;
 
+/*
+传感器数据输入
+├─ vehicle_attitude (IMU 姿态估计)
+├─ vehicle_angular_velocity (陀螺仪角速率)
+├─ airspeed_validated (空速)
+└─ vehicle_local_position (GPS/位置)
+    ↓
+┌───────────────────────────────────────┐
+│ FixedwingAttitudeControl::Run()       │
+│                                       │
+│ 1. 参数更新检查                        │
+│ 2. 计算时间步长 dt                     │
+│ 3. 尾座式坐标变换（如需要）             │
+│ 4. 手动控制处理（STABILIZED 模式）      │
+│ 5. 姿态设定值订阅                      │
+│ 6. 积分器重置判断                      │
+│ 7. 地速缩放计算                        │
+└───────────────────────────────────────┘
+    ↓
+┌───────────────────────────────────────┐
+│ 姿态控制器调用（角度→角速率）            │
+│                                       │
+│ _roll_ctrl.control_roll()             │
+│ _pitch_ctrl.control_pitch()           │
+│ _yaw_ctrl.control_yaw()               │
+│ _wheel_ctrl.control_attitude()        │
+└───────────────────────────────────────┘
+    ↓
+┌───────────────────────────────────────┐
+│ 角速率设定值组装                        │
+│                                       │
+│ ├─ 自动调参信号叠加                     │
+│ ├─ 手动偏航叠加                        │
+│ └─ 尾座式坐标再变换                     │
+└───────────────────────────────────────┘
+    ↓
+发布输出
+├─ vehicle_rates_setpoint (→ 角速率控制器)
+└─ landing_gear_wheel (→ 前轮执行器)
+*/
+
+
 FixedwingAttitudeControl::FixedwingAttitudeControl(bool vtol) :
 	ModuleParams(nullptr),
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
@@ -165,7 +207,7 @@ float FixedwingAttitudeControl::get_airspeed_constrained()
 
 	return math::constrain(airspeed, _param_fw_airspd_stall.get(), _param_fw_airspd_max.get());
 }
-
+//主控制循环调用
 void FixedwingAttitudeControl::Run()
 {
 	if (should_exit()) {
@@ -296,8 +338,8 @@ void FixedwingAttitudeControl::Run()
 			} else {
 				_rates_sp.reset_integral = false;
 			}
-
-			float groundspeed_scale = 1.f;
+			// 地面速度缩放计算
+			float groundspeed_scale = 1.f;// 地速 ≤ 失速速度：scale = 1.0（不缩放）
 
 			if (wheel_control) {
 				if (_local_pos_sub.updated()) {
@@ -312,14 +354,15 @@ void FixedwingAttitudeControl::Run()
 				// Use stall airspeed to calculate ground speed scaling region. Don't scale below gspd_scaling_trim
 				float gspd_scaling_trim = (_param_fw_airspd_stall.get());
 
+				// 地速 > 失速速度：scale = 失速速度 / 地速（缩放）
 				if (_groundspeed > gspd_scaling_trim) {
 					groundspeed_scale = gspd_scaling_trim / _groundspeed;
 
 				}
 			}
-
+// 姿态控制器调用（角度→角速率）
 			/* Run attitude controllers */
-
+			// 姿态控制器调用
 			if (_vcontrol_mode.flag_control_attitude_enabled && _in_fw_or_transition_wo_tailsitter_transition) {
 				const Quatf q_sp(_att_sp.q_d);
 
@@ -328,6 +371,12 @@ void FixedwingAttitudeControl::Run()
 					const float roll_sp = euler_sp.phi();
 					const float pitch_sp = euler_sp.theta();
 
+					/*调用顺序
+					滚转控制器先运行（需要偏航欧拉角速率补偿）
+					俯仰控制器次之（需要偏航欧拉角速率补偿）
+					偏航控制器最后运行（需要滚转角和俯仰欧拉角速率）
+					前轮控制器独立运行（基于偏航角）
+					*/
 					_roll_ctrl.control_roll(roll_sp, _yaw_ctrl.get_euler_rate_setpoint(), euler_angles.phi(),
 								euler_angles.theta());
 					_pitch_ctrl.control_pitch(pitch_sp, _yaw_ctrl.get_euler_rate_setpoint(), euler_angles.phi(),
@@ -341,11 +390,11 @@ void FixedwingAttitudeControl::Run()
 					} else {
 						_wheel_ctrl.reset_integrator();
 					}
-
+// 角速率设定值组装
 					/* Update input data for rate controllers */
 					Vector3f body_rates_setpoint = Vector3f(_roll_ctrl.get_body_rate_setpoint(), _pitch_ctrl.get_body_rate_setpoint(),
 										_yaw_ctrl.get_body_rate_setpoint());
-
+					// 自动 PID 调参支持
 					autotune_attitude_control_status_s pid_autotune;
 					matrix::Vector3f bodyrate_autotune_ff;
 
@@ -362,16 +411,18 @@ void FixedwingAttitudeControl::Run()
 					}
 
 					/* add yaw rate setpoint from sticks in all attitude-controlled modes */
+					//手动偏航叠加
 					if (_vcontrol_mode.flag_control_manual_enabled) {
 						body_rates_setpoint(2) += math::constrain(_manual_control_setpoint.yaw * radians(_param_man_yr_max.get()),
 									  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
 					}
 
 					// Tailsitter: transform from FW to hover frame (all interfaces are in hover (body) frame)
+					// 尾座式坐标再变换
 					if (_vehicle_status.is_vtol_tailsitter) {
 						body_rates_setpoint = Vector3f(body_rates_setpoint(2), body_rates_setpoint(1), -body_rates_setpoint(0));
 					}
-
+// 发布输出
 					/* Publish the rate setpoint for analysis once available */
 					_rates_sp.roll = body_rates_setpoint(0);
 					_rates_sp.pitch = body_rates_setpoint(1);
