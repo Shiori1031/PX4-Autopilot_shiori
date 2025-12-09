@@ -58,8 +58,10 @@ float YawController::control_yaw(float roll_setpoint, float euler_pitch_rate_set
 	bool inverted = false;
 
 	/* roll is used as feedforward term and inverted flight needs to be considered */
+	//fabsf：计算浮点数绝对值
 	if (fabsf(roll) < math::radians(90.f)) {
 		/* not inverted, but numerically still potentially close to infinity */
+		//滚转限幅到±80度，防止倒飞
 		constrained_roll = math::constrain(roll, math::radians(-80.f), math::radians(80.f));
 
 	} else {
@@ -76,12 +78,13 @@ float YawController::control_yaw(float roll_setpoint, float euler_pitch_rate_set
 			constrained_roll = math::constrain(roll, math::radians(-180.f), math::radians(-100.f));
 		}
 	}
-
+	//进一步限制
 	constrained_roll = math::constrain(constrained_roll, -fabsf(roll_setpoint), fabsf(roll_setpoint));
 
 
 	if (!inverted) {
 		/* Calculate desired yaw rate from coordinated turn constraint / (no side forces) */
+		//协调转弯
 		_euler_rate_setpoint = tanf(constrained_roll) * cosf(pitch) * CONSTANTS_ONE_G / airspeed;
 
 		/* Transform setpoint to body angular rates (jacobian) */

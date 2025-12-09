@@ -44,6 +44,9 @@
 
 using matrix::wrap_pi;
 
+// 航向设定值 ─► [姿态控制器] ─► 偏航角速率 ─► [角速率控制器] ─► 前轮偏转量/差动刹车
+//         (control_attitude P控制)     (control_bodyrate PI控制)
+
 float WheelController::control_bodyrate(float dt, float body_z_rate, float groundspeed, float groundspeed_scaler)
 {
 	/* Do not calculate control signal with bad inputs */
@@ -55,11 +58,13 @@ float WheelController::control_bodyrate(float dt, float body_z_rate, float groun
 	}
 
 	const float rate_error = _body_rate_setpoint - body_z_rate;
-
+	// 带抗饱和的积分器
 	if (_k_i > 0.f && groundspeed > 1.f) { // only start integrating when above 1m/s
 
+		// groundspeed_scaler：速度自适应缩放，高速时前轮灵敏度高，低速时需要更大偏转角
 		float id = rate_error * dt * groundspeed_scaler;
 
+		// 当输出已经饱和（≥±1）时，继续积分无意义（执行器已达极限），只允许减小积分项的方向，避免积分器"卡死"
 		if (_last_output < -1.f) {
 			/* only allow motion to center: increase value */
 			id = math::max(id, 0.f);
@@ -73,6 +78,8 @@ float WheelController::control_bodyrate(float dt, float body_z_rate, float groun
 	}
 
 	/* Apply PI rate controller and store non-limited output */
+	// 前馈 + PI 反馈
+	// groundspeed_scaler * groundspeed_scaler：前轮效果与速度的平方成正比
 	_last_output = _body_rate_setpoint * _k_ff * groundspeed_scaler +
 		       groundspeed_scaler * groundspeed_scaler * (rate_error * _k_p + _integrator);
 
@@ -87,9 +94,10 @@ float WheelController::control_attitude(float yaw_setpoint, float yaw)
 
 		return _body_rate_setpoint;
 	}
-
+	//误差归一化到 -pai 到 pai
 	const float yaw_error = wrap_pi(yaw_setpoint - yaw);
-
+	// P 控制，相当于Kp = 1/_tc, output = Kp * error
+	// 广义的P控制，只是根据相应时间_tc来调整比例系数，实现类似P控制的效果
 	_body_rate_setpoint = yaw_error / _tc; // assume 0 pitch and roll angle, thus jacobian is simply identity matrix
 
 	if (_max_rate > 0.01f) {
