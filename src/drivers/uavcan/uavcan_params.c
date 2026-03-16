@@ -595,6 +595,21 @@ PARAM_DEFINE_INT32(FORM_MASTER_EN, 0);
 PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
 
 /**
+ * Follower roll compensation gain
+ *
+ * Follower-side roll compensation gain for body-rate setpoint:
+ * roll_rate_sp = FORM_ROLL_COMP * (roll_cmd_tx - self_roll).
+ *
+ * @unit norm
+ * @min 0.5
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_COMP, 2.0f);
+
+/**
  * Yaw coupling coefficient
  *
  * Adds coordinated yaw command when rolling to prevent sideslip.

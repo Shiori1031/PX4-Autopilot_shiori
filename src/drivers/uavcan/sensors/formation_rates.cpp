@@ -43,6 +43,7 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	_param_follower_enable_h = param_find("FORM_FOLLOWER_EN");
 	_param_formation_position_h = param_find("FORM_POSITION");
 	_param_timeout_h = param_find("FORM_TIMEOUT");
+	_param_roll_comp_gain_h = param_find("FORM_ROLL_COMP");
 }
 
 int FormationRatesBridge::init()
@@ -58,6 +59,10 @@ int FormationRatesBridge::init()
 
 	if (_param_timeout_h != PARAM_INVALID) {
 		param_get(_param_timeout_h, &_timeout);
+	}
+
+	if (_param_roll_comp_gain_h != PARAM_INVALID) {
+		param_get(_param_roll_comp_gain_h, &_roll_comp_gain);
 	}
 
 	int res = _sub_formation_rates.start(FormationRatesCbBinder(this, &FormationRatesBridge::formation_rates_sub_cb));
@@ -77,10 +82,22 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 		param_get(_param_follower_enable_h, &_follower_enable);
 	}
 
+	if (_param_roll_comp_gain_h != PARAM_INVALID) {
+		param_get(_param_roll_comp_gain_h, &_roll_comp_gain);
+	}
+
 	// 检查是否启用从机模式
 	if (_follower_enable == 0) {
 		return;
 	}
+
+	if (_vehicle_attitude_sub.updated()) {
+		_vehicle_attitude_sub.copy(&_vehicle_attitude);
+	}
+
+	matrix::Quatf q(_vehicle_attitude.q);
+	matrix::Eulerf euler(q);
+	float self_roll = euler.phi();
 
 	// 解码 ArrayCommand 消息
 	float roll = 0.0f;
@@ -139,39 +156,39 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 		}
 	}
 
-// 重新加载位置参数
-if (_param_formation_position_h != PARAM_INVALID) {
-	param_get(_param_formation_position_h, &_formation_position);
-}
+	// 重新加载位置参数
+	if (_param_formation_position_h != PARAM_INVALID) {
+		param_get(_param_formation_position_h, &_formation_position);
+	}
 
-// 验证指令是否属于本机
-if (_formation_position == 0 || formation_position != _formation_position) {
-	// 不是发给本机的指令，忽略
-	return;
-}
+	// 验证指令是否属于本机
+	if (_formation_position == 0 || formation_position != _formation_position) {
+		// 不是发给本机的指令，忽略
+		return;
+	}
 
-_last_command_time = hrt_absolute_time();
+	_last_command_time = hrt_absolute_time();
 
-// 发布 offboard_control_mode 以维持 Offboard 模式
-offboard_control_mode_s offboard_mode{};
-offboard_mode.timestamp = _last_command_time;
-offboard_mode.position = false;
-offboard_mode.velocity = false;
-offboard_mode.acceleration = false;
-offboard_mode.attitude = false;
-offboard_mode.body_rate = true;  // 启用机体速率控制
-_offboard_control_mode_pub.publish(offboard_mode);
+	// 发布 offboard_control_mode 以维持 Offboard 模式
+	offboard_control_mode_s offboard_mode{};
+	offboard_mode.timestamp = _last_command_time;
+	offboard_mode.position = false;
+	offboard_mode.velocity = false;
+	offboard_mode.acceleration = false;
+	offboard_mode.attitude = false;
+	offboard_mode.body_rate = true;
+	_offboard_control_mode_pub.publish(offboard_mode);
 
-// 发布 vehicle_rates_setpoint 给速率控制器
-vehicle_rates_setpoint_s rates_sp{};
-rates_sp.timestamp = _last_command_time;
-rates_sp.roll = roll;
-rates_sp.pitch = pitch;
-rates_sp.yaw = yaw;
-rates_sp.thrust_body[0] = thrust_x;
-rates_sp.thrust_body[1] = thrust_y;
-rates_sp.thrust_body[2] = thrust_z;
-_vehicle_rates_setpoint_pub.publish(rates_sp);
+	// 发布 vehicle_rates_setpoint 给速率控制器
+	vehicle_rates_setpoint_s rates_sp{};
+	rates_sp.timestamp = _last_command_time;
+	rates_sp.roll = _roll_comp_gain * (roll - self_roll);
+	rates_sp.pitch = pitch;
+	rates_sp.yaw = yaw;
+	rates_sp.thrust_body[0] = thrust_x;
+	rates_sp.thrust_body[1] = thrust_y;
+	rates_sp.thrust_body[2] = thrust_z;
+	_vehicle_rates_setpoint_pub.publish(rates_sp);
 }
 
 int FormationRatesBridge::init_driver(uavcan_bridge::Channel *channel)

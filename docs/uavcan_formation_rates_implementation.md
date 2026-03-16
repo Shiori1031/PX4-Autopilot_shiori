@@ -6,8 +6,6 @@
 
 **核心机制：** 主机滚转输入 → 从机俯仰速率指令 → 整机升力差 → 编队滚转力矩
 
-**✨ 超级简化架构：** 解算逻辑已集成到发送器中，无需独立模块！
-
 核心构成如下：
 
 | 角色 | 文件 | 说明 |
@@ -15,14 +13,9 @@
 | 消息定义 | `msg/FormationRatesSetpoint.msg` | 编队速率设定值 uORB 消息（向后兼容，可选使用） |
 | **主机发送器** | `src/drivers/uavcan/formation_rates_sender.{hpp,cpp}` | **集成解算+发送**：订阅遥控器输入，内部解算左右从机速率指令，通过 UAVCAN 广播 |
 | UAVCAN 接收器 | `src/drivers/uavcan/sensors/formation_rates.{hpp,cpp}` | 接收 UAVCAN 速率指令，**直接发布控制指令**，自动生效 |
-| 参数配置 | `src/drivers/uavcan/uavcan_params.c` | 解算参数（FORM_R2P_GAIN 等）统一在 UAVCAN 参数文件中 |
+| 参数配置 | `src/drivers/uavcan/uavcan_params.c` | 解算参数（FORM_R2P_GAIN、FORM_ROLL_COMP 等）统一在 UAVCAN 参数文件中 |
 | 自动启动 | UAVCAN 驱动自动初始化 | 无需手动启动任何模块！ |
 
-**简化架构优势：**
-- ✅ **只有 2 个核心文件**（发送器 + 接收器）
-- ✅ **参照 control_command**：与 PWM 传输功能完全相同的架构
-- ✅ **无需独立模块**：所有逻辑集成在 UAVCAN 驱动中
-- ✅ **自动生效**：UAVCAN 驱动自动初始化，参数控制行为
 
 ## 2. 传输的数据
 
@@ -42,7 +35,7 @@
 **注意：**
 - 使用 actuator_id 100-110 范围，避免与标准舵机通道（0-15）冲突
 - Pitch rate（actuator_id 101）是从机的主要控制通道
-- 传输频率：100Hz
+- 传输频率：200Hz
 
 ### 2.2 uORB 消息内容
 `FormationRatesSetpoint` 包含：
@@ -61,15 +54,16 @@
 
 **机械结构前提：**
 三机通过刚性连杆连接，连接处允许相对俯仰（铰链式），但不允许相对滚转。因此：
-- 从机**副翼不使用**（roll 通道发 0，副翼保持中立）
+- 从机 roll 通道接收主机滚转指令，并在接收端通过相对姿态补偿形成闭环
 - 从机**通过整体俯仰充当编队的"副翼"**——升降舵偏转改变本机升力，左右升力差产生编队滚转力矩
 
 **核心算法：**
 ```
 从机 pitch_rate = ±主机 roll × FORM_R2P_GAIN + 主机 pitch × FORM_PITCH_SYNC
-从机 thrust    = 主机油门 ± 主机 roll × FORM_THR_DIFF
+从机 thrust    = 主机油门 ± max/min(主机 yaw, 0) × FORM_THR_DIFF //把主机分为左右轴，由左右定加推力，不减小
 从机 yaw_rate  = 主机 yaw ± 主机 roll × FORM_YAW_K
-从机 roll_rate = 0（刚性连接，无法独立滚转）
+发送 roll_cmd_tx = 主机 roll
+从机 roll_rate_sp = FORM_ROLL_COMP × (roll_cmd_tx - 从机自身roll)
 ```
 
 #### 2.3.1 编队滚转（核心控制）
@@ -78,8 +72,8 @@
 
 | 主机输入          | 左机 pitch             | 右机 pitch              | 物理效果 |
 | --------         | ----------             | ----------             | -------- |
-| Roll 右（+0.5） | -1.0 rad/s（低头减升力） | +1.0 rad/s（抬头加升力） | 编队右滚 |
-| Roll 左（-0.5） | +1.0 rad/s（抬头加升力） | -1.0 rad/s（低头减升力） | 编队左滚 |
+| Roll 右（+0.5） | +1.0 rad/s（抬头加升力） | -1.0 rad/s（低头减升力） | 编队右滚 |
+| Roll 左（-0.5） | -1.0 rad/s（低头减升力） | +1.0 rad/s（抬头加升力） | 编队左滚 |
 | Roll 中（0）    | 0（中立）                | 0（中立）              | 直飞不偏 |
 
 关键参数：`FORM_R2P_GAIN`（默认 2.0），值越大升降舵偏转越大，滚转响应越快。
@@ -97,15 +91,15 @@
 
 注意：俯仰同步与滚转映射叠加在同一个 pitch 通道，最终值 = 滚转映射 + 俯仰同步。
 
-#### 2.3.3 编队转弯（推力差速 + 协调偏航）
+#### 2.3.3 编队转弯（偏航差速 + 协调偏航）
 
-转弯时外侧机线速度更大，需更多推力；同时添加偏航耦合防止侧滑。差速与横滚成比例，直飞时差速为零。
+转弯时外侧机线速度更大，需更多推力；同时添加偏航耦合防止侧滑。差速与偏航输入相关，未朝对应方向偏航时不减推力。
 
 | 主机输入 | 左机推力 | 右机推力 | 说明 |
 | -------- | -------- | -------- | ---- |
-| Roll 右（+0.5） | 基础 + 0.025 | 基础 - 0.025 | 左机在外侧加速 |
-| Roll 左（-0.5） | 基础 - 0.025 | 基础 + 0.025 | 右机在外侧加速 |
-| Roll 中（0） | 基础 | 基础 | 直飞，三机推力同步 |
+| Yaw 右（+0.5） | 基础 + 0.025 | 基础 | 左机增加推力 |
+| Yaw 左（-0.5） | 基础 | 基础 + 0.025 | 右机增加推力 |
+| Yaw 中（0） | 基础 | 基础 | 直飞，三机推力同步 |
 
 偏航耦合同理，`FORM_YAW_K` 控制偏航随横滚的比例，防止转弯侧滑。
 
@@ -121,18 +115,20 @@
 
 **左机完整指令：**
 ```
-roll_rate  = 0
+roll_cmd_tx = manual.roll
+roll_rate_sp = FORM_ROLL_COMP × (roll_cmd_tx - self_roll)
 pitch_rate = manual.roll × FORM_R2P_GAIN + manual.pitch × FORM_PITCH_SYNC
 yaw_rate   = manual.yaw  + (-manual.roll × FORM_YAW_K)
-thrust     = (manual.throttle + 1) / 2 + manual.roll × FORM_THR_DIFF
+thrust     = (manual.throttle + 1) / 2 + max(manual.yaw, 0) × FORM_THR_DIFF
 ```
 
 **右机完整指令：**
 ```
-roll_rate  = 0
+roll_cmd_tx = manual.roll
+roll_rate_sp = FORM_ROLL_COMP × (roll_cmd_tx - self_roll)
 pitch_rate = -manual.roll × FORM_R2P_GAIN + manual.pitch × FORM_PITCH_SYNC
 yaw_rate   = manual.yaw  + (+manual.roll × FORM_YAW_K)
-thrust     = (manual.throttle + 1) / 2 - manual.roll × FORM_THR_DIFF
+thrust     = (manual.throttle + 1) / 2 - min(manual.yaw, 0) × FORM_THR_DIFF
 ```
 
 注意 pitch_rate 中滚转映射**左右相反**（一个抬头一个低头），而俯仰同步**左右相同**（三机一起抬头）。
@@ -142,7 +138,7 @@ thrust     = (manual.throttle + 1) / 2 - manual.roll × FORM_THR_DIFF
 - **`msg/FormationRatesSetpoint.msg`**：uORB 消息定义，包含角速率、推力、编队位置标识（向后兼容）
 - **`src/drivers/uavcan/formation_rates_sender.{hpp,cpp}`**：**主机集成发送器**，订阅遥控器输入，内部解算左右从机速率指令，通过 UAVCAN 广播
 - **`src/drivers/uavcan/sensors/formation_rates.{hpp,cpp}`**：**从机 UAVCAN 接收器**，解析 ArrayCommand，直接发布 vehicle_rates_setpoint + offboard_control_mode
-- **`src/drivers/uavcan/uavcan_params.c`**：所有编队参数（FORM_R2P_GAIN、FORM_YAW_K、FORM_FOLLOWER_EN、FORM_POSITION 等）
+- **`src/drivers/uavcan/uavcan_params.c`**：所有编队参数（FORM_R2P_GAIN、FORM_ROLL_COMP、FORM_YAW_K、FORM_FOLLOWER_EN、FORM_POSITION 等）
 
 ## 4. 参数配置
 
@@ -170,6 +166,7 @@ thrust     = (manual.throttle + 1) / 2 - manual.roll × FORM_THR_DIFF
 | `UAVCAN_NODE_ID` | INT32 | - | **左机=2，右机=3** |
 | `UAVCAN_SUB_FORM` | INT32 | 0 | **编队控制订阅使能，设为 1**（启用接收器模块） |
 | `FORM_FOLLOWER_EN` | INT32 | 0 | **编队跟随器内部使能，设为 1**（接收器处理消息开关） |
+| `FORM_ROLL_COMP` | FLOAT | 2.0 | roll 相对误差补偿增益（用于 `roll = gain × (cmd_roll - self_roll)`） |
 | `FORM_POSITION` | INT32 | 0 | **编队位置**（1=左/2=右），**必须正确设置** |
 | `FORM_TIMEOUT` | FLOAT | 0.5 | 指令超时时间（秒） |
 | `COM_OF_LOSS_T` | FLOAT | 1.0 | Offboard 超时时间（秒） |
@@ -197,6 +194,7 @@ param set UAVCAN_ENABLE 3
 param set UAVCAN_NODE_ID 2
 param set UAVCAN_SUB_FORM 1          # 启用编队控制接收器（外层开关）
 param set FORM_FOLLOWER_EN 1         # 启用跟随器消息处理（内层开关）
+param set FORM_ROLL_COMP 2.0         # 从机滚转补偿增益
 param set FORM_POSITION 1            # 左机
 param set FORM_TIMEOUT 0.5           # 指令超时时间
 param save
@@ -213,6 +211,7 @@ param set UAVCAN_ENABLE 3
 param set UAVCAN_NODE_ID 3
 param set UAVCAN_SUB_FORM 1          # 启用编队控制接收器（外层开关）
 param set FORM_FOLLOWER_EN 1         # 启用跟随器消息处理（内层开关）
+param set FORM_ROLL_COMP 2.0         # 从机滚转补偿增益
 param set FORM_POSITION 2            # 右机
 param set FORM_TIMEOUT 0.5           # 指令超时时间
 param save
@@ -262,10 +261,6 @@ commander check
 ekf2 status
 ```
 
-**✨ 新架构优势：**
-- 主机：设置参数后重启，UAVCAN 发送器**自动工作**，无需独立模块
-- 从机：设置参数后重启，UAVCAN 接收器**自动处理**
-- 只需手动切换从机到 Offboard 模式即可开始编队飞行
 
 ## 5. 验证方法
 
@@ -314,8 +309,8 @@ listener vehicle_status            # 确认 nav_state = 14（Offboard）
 ### 5.5 地面滚转测试
 1. 主机移动遥控器横滚摇杆至左侧
 2. 观察从机升降舵响应：
-   - 左机升降舵上偏（抬头）
-   - 右机升降舵下偏（低头）
+   - 左机升降舵下偏（低头）
+   - 右机升降舵上偏（抬头）
 3. 确认响应方向正确
 
 ## 6. 代码流程概述
@@ -325,18 +320,19 @@ listener vehicle_status            # 确认 nav_state = 14（Offboard）
 **文件：** `src/drivers/uavcan/formation_rates_sender.{hpp,cpp}`
 
 **初始化流程：**
-UAVCAN 驱动启动时自动创建 `FormationRatesSender` 实例，构造函数中查找参数句柄（FORM_R2P_GAIN 等），`init()` 加载参数并启动 100Hz 定时器。
+UAVCAN 驱动启动时自动创建 `FormationRatesSender` 实例，构造函数中查找参数句柄（FORM_R2P_GAIN 等），`init()` 加载参数并启动 200Hz 定时器。
 
-**周期执行流程（`periodic_update`，100Hz）：**
-1. 读取 `manual_control_setpoint`（遥控器输入），无新数据则跳过
+**周期执行流程（`periodic_update`，200Hz）：**
+1. 读取 `manual_control_setpoint`（遥控器输入），数据超过 500ms 未更新则跳过
 2. 检查 `vehicle_status`，仅在固定翼模式下工作
 3. **计算左机指令**：
+   - `roll_cmd_tx = manual.roll`（发送给从机的滚转命令）
    - `pitch_rate = manual.roll × FORM_R2P_GAIN`（核心映射：主机横滚→从机俯仰）
    - `yaw_rate = manual.yaw + (-manual.roll × FORM_YAW_K)`（协调转弯偏航）
-   - `thrust = (throttle+1)/2 + FORM_THR_DIFF`（外侧机增加推力）
+   - `thrust = (throttle+1)/2 + max(manual.yaw, 0) × FORM_THR_DIFF`（右偏航时左机加推）
    - `formation_position = 1`（标识为左机）
 4. 将以上数据编码为 `ArrayCommand`（actuator_id 100-110），UAVCAN 广播
-5. **计算右机指令**：与左机类似但 pitch 和 yaw 耦合方向**取反**，推力**减少**差异量，`formation_position = 2`
+5. **计算右机指令**：与左机类似但 pitch 和 yaw 耦合方向**取反**，推力按 `-min(manual.yaw, 0)` 处理，`formation_position = 2`
 6. 广播右机消息
 
 **关键点：** 左右机 pitch 方向相反，形成升力差产生编队滚转力矩。
@@ -350,15 +346,18 @@ UAVCAN 驱动启动时检查 `UAVCAN_SUB_FORM` 参数，如果为 1 则创建 `F
 
 **接收回调流程（`formation_rates_sub_cb`，每收到消息触发）：**
 1. 检查 `FORM_FOLLOWER_EN` 参数（内层开关），未启用则直接返回
-2. 遍历 `ArrayCommand` 中所有 `Command`，按 `actuator_id` 解码：
+2. 读取 `vehicle_attitude`，获取从机自身滚转角 `self_roll`
+3. 遍历 `ArrayCommand` 中所有 `Command`，按 `actuator_id` 解码：
    - 100→滚转速率、101→俯仰速率、102→偏航速率
    - 103→前向推力、104→横向推力、105→垂向推力
    - 110→编队位置标识
-3. 对比 `formation_position` 与本机 `FORM_POSITION` 参数，不匹配则忽略
-4. **发布 `offboard_control_mode`**：设置 `body_rate=true`，维持 Offboard 模式心跳
-5. **发布 `vehicle_rates_setpoint`**：将解码的速率和推力值直接写入，交给 `fw_rate_control` 执行
+4. 对比 `formation_position` 与本机 `FORM_POSITION` 参数，不匹配则忽略
+5. **发布 `offboard_control_mode`**：设置 `body_rate=true`，维持 Offboard 模式心跳
+6. **发布 `vehicle_rates_setpoint`**：
+   - `rates_sp.roll = FORM_ROLL_COMP × (接收roll_cmd_tx - self_roll)`（相对滚转闭环补偿后的最终执行值）
+   - `pitch/yaw/thrust` 使用接收值
 
-**关键点：** 从机通过 FORM_POSITION 参数过滤消息，只响应属于自己的指令。Offboard 心跳由接收器自动维持，无需额外模块。
+**关键点：** 从机通过 FORM_POSITION 参数过滤消息，只响应属于自己的指令；并对 roll 通道引入相对姿态闭环补偿。Offboard 心跳由接收器自动维持，无需额外模块。
 
 ### 6.3 注意事项
 
@@ -367,6 +366,7 @@ UAVCAN 驱动启动时检查 `UAVCAN_SUB_FORM` 参数，如果为 1 则创建 `F
 - **超时保护**：编队指令 500ms 超时（FORM_TIMEOUT），Offboard 模式 1000ms 超时（COM_OF_LOSS_T）
 - **增益调试**：
   - `FORM_R2P_GAIN`：1.5-3.0（过小响应弱，过大可能振荡）
+   - `FORM_ROLL_COMP`：1.5-3.0（从机 roll 补偿增益，过小跟随慢，过大易振荡）
   - `FORM_YAW_K`：0.2-0.5（观察转弯时侧滑情况调整）
   - `FORM_THR_DIFF`：0.03-0.08（观察转弯时速度差调整）
 - **地面测试充分**：移动所有遥控器摇杆，确认从机升降舵响应方向正确

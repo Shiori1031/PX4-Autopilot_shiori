@@ -515,6 +515,7 @@ UavcanNode::init(uavcan::NodeID node_id, UAVCAN_DRIVER::BusEvent &bus_events)
 	param_find("FORM_TIMEOUT");
 	param_find("FORM_MASTER_EN");
 	param_find("FORM_R2P_GAIN");
+	param_find("FORM_ROLL_COMP");
 	param_find("FORM_YAW_K");
 	param_find("FORM_THR_DIFF");
 	param_find("FORM_PITCH_SYNC");

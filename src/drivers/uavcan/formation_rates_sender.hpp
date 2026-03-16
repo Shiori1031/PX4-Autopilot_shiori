@@ -68,7 +68,7 @@ public:
 	int init();
 
 private:
-	static constexpr unsigned MAX_RATE_HZ = 100;  // 100Hz 更新频率
+	static constexpr unsigned MAX_RATE_HZ = 200;  // 200Hz 更新频率
 
 	void periodic_update(const uavcan::TimerEvent &);
 	void update_params();
