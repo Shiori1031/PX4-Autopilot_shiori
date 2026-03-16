@@ -69,7 +69,7 @@ int FormationRatesBridge::init()
 
 	return PX4_OK;
 }
-
+// UAVCAN 速率指令订阅回调
 void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::actuator::ArrayCommand> &msg)
 {
 	// 重新加载参数（支持运行时更新）

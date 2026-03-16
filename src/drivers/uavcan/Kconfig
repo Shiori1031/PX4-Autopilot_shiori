@@ -15,8 +15,8 @@ if DRIVERS_UAVCAN
         default y
 
     config UAVCAN_CONTROL_COMMAND_SENDER
-        bool "Include control command sender"
-        default y
+        bool "Include control command sender (DEPRECATED)"
+        default n
 
     config UAVCAN_FORMATION_RATES_SENDER
         bool "Include formation rates sender"
@@ -52,10 +52,6 @@ if DRIVERS_UAVCAN
 
     config UAVCAN_SENSOR_ATTITUDE
         bool "Subscribe to Attitude Solution:           uavcan::equipment::ahrs::Solution"
-        default y
-
-    config UAVCAN_SENSOR_CONTROL_COMMAND
-        bool "Subscribe to Control Command:             uavcan::equipment::actuator::ArrayCommand"
         default y
 
     config UAVCAN_SENSOR_FORMATION_RATES
