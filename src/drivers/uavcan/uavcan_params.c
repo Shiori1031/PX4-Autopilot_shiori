@@ -551,33 +551,6 @@ PARAM_DEFINE_INT32(FORM_FOLLOWER_EN, 0);
 PARAM_DEFINE_INT32(FORM_POSITION, 0);
 
 /**
- * Formation command timeout
- *
- * Maximum time without receiving formation rate commands before
- * entering neutral mode and exiting Offboard.
- *
- * @unit s
- * @min 0.1
- * @max 5.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_TIMEOUT, 0.5f);
-
-/**
- * Formation master enable
- *
- * Enable the formation master controller.
- * Set to 1 on the center (master) aircraft only.
- *
- * @boolean
- * @group Formation Control
- * @reboot_required true
- */
-PARAM_DEFINE_INT32(FORM_MASTER_EN, 0);
-
-/**
  * Roll to pitch mapping gain
  *
  * Converts master aircraft roll input to follower pitch rate command.

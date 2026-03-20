@@ -42,7 +42,6 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	// 查找参数句柄
 	_param_follower_enable_h = param_find("FORM_FOLLOWER_EN");
 	_param_formation_position_h = param_find("FORM_POSITION");
-	_param_timeout_h = param_find("FORM_TIMEOUT");
 	_param_roll_comp_gain_h = param_find("FORM_ROLL_COMP");
 }
 
@@ -55,10 +54,6 @@ int FormationRatesBridge::init()
 
 	if (_param_formation_position_h != PARAM_INVALID) {
 		param_get(_param_formation_position_h, &_formation_position);
-	}
-
-	if (_param_timeout_h != PARAM_INVALID) {
-		param_get(_param_timeout_h, &_timeout);
 	}
 
 	if (_param_roll_comp_gain_h != PARAM_INVALID) {

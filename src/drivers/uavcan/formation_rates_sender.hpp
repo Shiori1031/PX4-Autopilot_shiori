@@ -88,14 +88,9 @@ private:
 	param_t _param_yaw_coupling_h;
 	param_t _param_throttle_diff_h;
 	param_t _param_pitch_sync_h;
-	param_t _param_left_node_id_h;
-	param_t _param_right_node_id_h;
-
 	// 参数缓存值
 	float _roll_to_pitch_gain{2.0f};		// 横滚到俯仰映射增益
 	float _yaw_coupling{0.3f};		// 偏航耦合系数
 	float _throttle_diff{0.05f};		// 油门差异
 	float _pitch_sync{0.1f};		// 俯仰同步系数
-	int32_t _left_node_id{2};		// 左机节点ID
-	int32_t _right_node_id{3};		// 右机节点ID
 };

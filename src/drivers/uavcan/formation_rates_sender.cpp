@@ -49,8 +49,6 @@ FormationRatesSender::FormationRatesSender(uavcan::INode &node) :
 	_param_yaw_coupling_h = param_find("FORM_YAW_K");
 	_param_throttle_diff_h = param_find("FORM_THR_DIFF");
 	_param_pitch_sync_h = param_find("FORM_PITCH_SYNC");
-	_param_left_node_id_h = param_find("FORM_LEFT_ID");
-	_param_right_node_id_h = param_find("FORM_RIGHT_ID");
 }
 
 int FormationRatesSender::init()
@@ -58,7 +56,7 @@ int FormationRatesSender::init()
 	// 加载参数
 	update_params();
 
-	// 启动周期定时器（100Hz）
+	// 启动周期定时器（200Hz）
 	if (!_timer.isRunning()) {
 		_timer.setCallback(TimerCbBinder(this, &FormationRatesSender::periodic_update));
 		_timer.startPeriodic(uavcan::MonotonicDuration::fromMSec(1000 / MAX_RATE_HZ));
@@ -85,13 +83,6 @@ void FormationRatesSender::update_params()
 		param_get(_param_pitch_sync_h, &_pitch_sync);
 	}
 
-	if (_param_left_node_id_h != PARAM_INVALID) {
-		param_get(_param_left_node_id_h, &_left_node_id);
-	}
-
-	if (_param_right_node_id_h != PARAM_INVALID) {
-		param_get(_param_right_node_id_h, &_right_node_id);
-	}
 }
 
 void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
@@ -130,8 +121,7 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 	uavcan::equipment::actuator::Command left_pitch;
 	left_pitch.actuator_id = 101;
 	left_pitch.command_type = uavcan::equipment::actuator::Command::COMMAND_TYPE_SPEED;
-	left_pitch.command_value = manual.roll * _roll_to_pitch_gain
-				  + manual.pitch * _pitch_sync;
+	left_pitch.command_value = manual.roll * _roll_to_pitch_gain  + manual.pitch * _pitch_sync;
 	left_msg.commands.push_back(left_pitch);
 
 	// 偏航速率（协调转弯）
@@ -175,8 +165,7 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 	uavcan::equipment::actuator::Command right_pitch;
 	right_pitch.actuator_id = 101;
 	right_pitch.command_type = uavcan::equipment::actuator::Command::COMMAND_TYPE_SPEED;
-	right_pitch.command_value = -manual.roll * _roll_to_pitch_gain
-				   + manual.pitch * _pitch_sync;
+	right_pitch.command_value = -manual.roll * _roll_to_pitch_gain + manual.pitch * _pitch_sync;
 	right_msg.commands.push_back(right_pitch);
 
 	// 偏航速率（协调转弯，耦合方向与左机相反）
@@ -191,7 +180,7 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 	right_thrust.actuator_id = 103;
 	right_thrust.command_type = uavcan::equipment::actuator::Command::COMMAND_TYPE_UNITLESS;
 	right_thrust.command_value = math::constrain(
-		(manual.throttle + 1.0f) * 0.5f - math::min(manual.yaw, 0.0f) * _throttle_diff, 0.0f, 1.0f);
+		(manual.throttle + 1.0f) * 0.5f + math::max(-manual.yaw, 0.0f) * _throttle_diff, 0.0f, 1.0f);
 	right_msg.commands.push_back(right_thrust);
 
 	// 编队位置标识

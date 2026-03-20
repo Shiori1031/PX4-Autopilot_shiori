@@ -93,7 +93,6 @@ set(msg_files
 	FollowTarget.msg
 	FollowTargetEstimator.msg
 	FollowTargetStatus.msg
-	FormationRatesSetpoint.msg
 	FuelTankStatus.msg
 	FixedWingLateralGuidanceStatus.msg
 	FixedWingLateralStatus.msg
