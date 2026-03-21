@@ -258,8 +258,8 @@ PARAM_DEFINE_INT32(UAVCAN_PUB_CTRL, 0);
 /**
  * publish formation rates
  *
- * Enable UAVCAN formation rate setpoint publication
- *  uavcan::equipment::actuator::ArrayCommand (with formation encoding)
+ * Enable UAVCAN formation control input publication
+ *  dronecan::formation::ControlInput
  *
  * @boolean
  * @reboot_required true
@@ -476,8 +476,8 @@ PARAM_DEFINE_INT32(UAVCAN_SUB_CTRL, 0);
 /**
  * subscription formation rates
  *
- * Enable UAVCAN formation rate setpoint subscription.
- *  uavcan::equipment::actuator::ArrayCommand (with formation encoding)
+ * Enable UAVCAN formation control input subscription.
+ *  dronecan::formation::ControlInput
  *
  * @boolean
  * @reboot_required true
@@ -570,7 +570,7 @@ PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
 /**
  * Follower roll compensation gain
  *
- * Follower-side roll compensation gain for body-rate setpoint:
+ * Follower-side self-stabilization gain for body-rate setpoint:
  * roll_rate_sp = FORM_ROLL_COMP * (roll_cmd_tx - self_roll).
  *
  * @unit norm
@@ -583,10 +583,12 @@ PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
 PARAM_DEFINE_FLOAT(FORM_ROLL_COMP, 2.0f);
 
 /**
- * Yaw coupling coefficient
+ * Yaw throttle boost coefficient
  *
- * Adds coordinated yaw command when rolling to prevent sideslip.
+ * Additional throttle applied to the outer follower during yaw maneuvers.
+ * Positive yaw boosts the left follower, negative yaw boosts the right follower.
  *
+ * @unit norm
  * @min 0.0
  * @max 1.0
  * @decimal 2
@@ -596,23 +598,9 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_COMP, 2.0f);
 PARAM_DEFINE_FLOAT(FORM_YAW_K, 0.3f);
 
 /**
- * Throttle differential for outer plane
- *
- * Additional throttle for the outer plane during roll maneuvers.
- *
- * @unit norm
- * @min 0.0
- * @max 0.2
- * @decimal 3
- * @increment 0.01
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_THR_DIFF, 0.05f);
-
-/**
  * Pitch synchronization coefficient
  *
- * How much follower planes should track master pitch.
+ * How much follower planes should track master pitch input.
  * 0.0 = no sync, 1.0 = full sync.
  *
  * @unit norm
@@ -623,3 +611,48 @@ PARAM_DEFINE_FLOAT(FORM_THR_DIFF, 0.05f);
  * @group Formation Control
  */
 PARAM_DEFINE_FLOAT(FORM_PITCH_SYNC, 0.1f);
+
+/**
+ * Pitch self-stabilization coefficient
+ *
+ * Additional pitch compensation based on the follower's own pitch angle.
+ * Larger values increase pitch disturbance rejection.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PITCH_COMP, 1.0f);
+
+/**
+ * Yaw synchronization coefficient
+ *
+ * How much follower planes should track master yaw input.
+ * 0.0 = no sync, 1.0 = full sync.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_SYNC, 1.0f);
+
+/**
+ * Yaw self-stabilization coefficient
+ *
+ * Additional damping based on the follower's own yaw rate.
+ * Larger values increase yaw disturbance rejection.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_COMP, 0.3f);

@@ -36,33 +36,23 @@
 #include "sensor_bridge.hpp"
 
 #include <drivers/drv_hrt.h>
-#include <uavcan/equipment/actuator/ArrayCommand.hpp>
+#include <dronecan/formation/ControlInput.hpp>
 
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/vehicle_rates_setpoint.h>
 #include <uORB/topics/offboard_control_mode.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_angular_velocity.h>
 #include <parameters/param.h>
 #include <matrix/math.hpp>
 
 /**
- * @brief 编队速率指令 UAVCAN 接收器（直接控制模式）
+ * @brief 编队控制输入 UAVCAN 接收器
  *
- * 通过 UAVCAN ArrayCommand 接收主机发送的编队速率指令，
- * 解码角速率和推力值，并直接发布到
- * vehicle_rates_setpoint 和 offboard_control_mode 主题。
- *
- * 无需手动启动模块 —— 当 FORM_FOLLOWER_EN=1 时自动激活。
- *
- * 解码格式：
- *   actuator_id 100 = 滚转速率 (rad/s)
- *   actuator_id 101 = 俯仰速率 (rad/s)
- *   actuator_id 102 = 偏航速率 (rad/s)
- *   actuator_id 103 = 前向推力
- *   actuator_id 104 = 横向推力
- *   actuator_id 105 = 垂向推力
- *   actuator_id 110 = 编队位置（必须与 FORM_POSITION 匹配）
+ * 接收主机发送的 throttle/yaw/roll/pitch/flags 自定义 DroneCAN 消息，
+ * 按本机 FORM_POSITION 在从机本地完成编队控制解算，并直接发布到
+ * vehicle_rates_setpoint 和 offboard_control_mode。
  */
 class FormationRatesBridge : public UavcanSensorBridgeBase
 {
@@ -77,30 +67,40 @@ public:
 
 private:
 	typedef uavcan::MethodBinder<FormationRatesBridge *,
-		void (FormationRatesBridge::*)(const uavcan::ReceivedDataStructure<uavcan::equipment::actuator::ArrayCommand> &)>
+		void (FormationRatesBridge::*)(const uavcan::ReceivedDataStructure<dronecan::formation::ControlInput> &)>
 		FormationRatesCbBinder;
 
-	void formation_rates_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::actuator::ArrayCommand> &msg);
+	void formation_rates_sub_cb(const uavcan::ReceivedDataStructure<dronecan::formation::ControlInput> &msg);
 
 	int init_driver(uavcan_bridge::Channel *channel) override;
 
-	uavcan::Subscriber<uavcan::equipment::actuator::ArrayCommand, FormationRatesCbBinder> _sub_formation_rates;
+	uavcan::Subscriber<dronecan::formation::ControlInput, FormationRatesCbBinder> _sub_formation_rates;
 
-	// 直接控制发布器
 	uORB::Publication<vehicle_rates_setpoint_s> _vehicle_rates_setpoint_pub{ORB_ID(vehicle_rates_setpoint)};
 	uORB::Publication<offboard_control_mode_s> _offboard_control_mode_pub{ORB_ID(offboard_control_mode)};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
 	vehicle_attitude_s _vehicle_attitude{};
 
 	hrt_abstime _last_command_time{0};
 
-	// 参数句柄
 	param_t _param_follower_enable_h;
 	param_t _param_formation_position_h;
+	param_t _param_roll_to_pitch_gain_h;
+	param_t _param_yaw_throttle_gain_h;
+	param_t _param_pitch_sync_h;
+	param_t _param_pitch_comp_gain_h;
+	param_t _param_yaw_sync_h;
+	param_t _param_yaw_comp_gain_h;
 	param_t _param_roll_comp_gain_h;
 
-	// 参数缓存值
 	int32_t _follower_enable{0};
 	int32_t _formation_position{0};
+	float _roll_to_pitch_gain{2.0f};
+	float _yaw_throttle_gain{0.05f};
+	float _pitch_sync{1.0f};
+	float _pitch_comp_gain{1.0f};
+	float _yaw_sync{1.0f};
+	float _yaw_comp_gain{0.3f};
 	float _roll_comp_gain{1.0f};
 };

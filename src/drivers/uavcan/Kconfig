@@ -55,7 +55,7 @@ if DRIVERS_UAVCAN
         default y
 
     config UAVCAN_SENSOR_FORMATION_RATES
-        bool "Subscribe to Formation Rates:             uavcan::equipment::actuator::ArrayCommand (formation encoding)"
+        bool "Subscribe to Formation Rates:             dronecan::formation::ControlInput"
         default n
 
     config UAVCAN_SENSOR_AIRSPEED

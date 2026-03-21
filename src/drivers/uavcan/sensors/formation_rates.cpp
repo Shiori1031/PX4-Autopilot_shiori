@@ -33,7 +33,15 @@
 
 #include "formation_rates.hpp"
 
+#include <lib/mathlib/mathlib.h>
+
 const char *const FormationRatesBridge::NAME = "formation_rates";
+
+namespace
+{
+constexpr int32_t FORMATION_POSITION_LEFT = 1;
+constexpr int32_t FORMATION_POSITION_RIGHT = 2;
+}
 
 FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublisher *node_info_publisher) :
 	UavcanSensorBridgeBase("uavcan_formation_rates", ORB_ID(vehicle_rates_setpoint), node_info_publisher, 8),
@@ -42,6 +50,12 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	// 查找参数句柄
 	_param_follower_enable_h = param_find("FORM_FOLLOWER_EN");
 	_param_formation_position_h = param_find("FORM_POSITION");
+	_param_roll_to_pitch_gain_h = param_find("FORM_R2P_GAIN");
+	_param_yaw_throttle_gain_h = param_find("FORM_YAW_K");
+	_param_pitch_sync_h = param_find("FORM_PITCH_SYNC");
+	_param_pitch_comp_gain_h = param_find("FORM_PITCH_COMP");
+	_param_yaw_sync_h = param_find("FORM_YAW_SYNC");
+	_param_yaw_comp_gain_h = param_find("FORM_YAW_COMP");
 	_param_roll_comp_gain_h = param_find("FORM_ROLL_COMP");
 }
 
@@ -56,10 +70,35 @@ int FormationRatesBridge::init()
 		param_get(_param_formation_position_h, &_formation_position);
 	}
 
+	if (_param_roll_to_pitch_gain_h != PARAM_INVALID) {
+		param_get(_param_roll_to_pitch_gain_h, &_roll_to_pitch_gain);
+	}
+
+	if (_param_yaw_throttle_gain_h != PARAM_INVALID) {
+		param_get(_param_yaw_throttle_gain_h, &_yaw_throttle_gain);
+	}
+
+	if (_param_pitch_sync_h != PARAM_INVALID) {
+		param_get(_param_pitch_sync_h, &_pitch_sync);
+	}
+
+	if (_param_pitch_comp_gain_h != PARAM_INVALID) {
+		param_get(_param_pitch_comp_gain_h, &_pitch_comp_gain);
+	}
+
+	if (_param_yaw_sync_h != PARAM_INVALID) {
+		param_get(_param_yaw_sync_h, &_yaw_sync);
+	}
+
+	if (_param_yaw_comp_gain_h != PARAM_INVALID) {
+		param_get(_param_yaw_comp_gain_h, &_yaw_comp_gain);
+	}
+
 	if (_param_roll_comp_gain_h != PARAM_INVALID) {
 		param_get(_param_roll_comp_gain_h, &_roll_comp_gain);
 	}
-
+	// 启动 UAVCAN 订阅
+	// 启动 UAVCAN 订阅
 	int res = _sub_formation_rates.start(FormationRatesCbBinder(this, &FormationRatesBridge::formation_rates_sub_cb));
 
 	if (res < 0) {
@@ -69,12 +108,40 @@ int FormationRatesBridge::init()
 
 	return PX4_OK;
 }
-// UAVCAN 速率指令订阅回调
-void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStructure<uavcan::equipment::actuator::ArrayCommand> &msg)
+
+void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStructure<dronecan::formation::ControlInput> &msg)
 {
 	// 重新加载参数（支持运行时更新）
 	if (_param_follower_enable_h != PARAM_INVALID) {
 		param_get(_param_follower_enable_h, &_follower_enable);
+	}
+
+	if (_param_formation_position_h != PARAM_INVALID) {
+		param_get(_param_formation_position_h, &_formation_position);
+	}
+
+	if (_param_roll_to_pitch_gain_h != PARAM_INVALID) {
+		param_get(_param_roll_to_pitch_gain_h, &_roll_to_pitch_gain);
+	}
+
+	if (_param_yaw_throttle_gain_h != PARAM_INVALID) {
+		param_get(_param_yaw_throttle_gain_h, &_yaw_throttle_gain);
+	}
+
+	if (_param_pitch_sync_h != PARAM_INVALID) {
+		param_get(_param_pitch_sync_h, &_pitch_sync);
+	}
+
+	if (_param_pitch_comp_gain_h != PARAM_INVALID) {
+		param_get(_param_pitch_comp_gain_h, &_pitch_comp_gain);
+	}
+
+	if (_param_yaw_sync_h != PARAM_INVALID) {
+		param_get(_param_yaw_sync_h, &_yaw_sync);
+	}
+
+	if (_param_yaw_comp_gain_h != PARAM_INVALID) {
+		param_get(_param_yaw_comp_gain_h, &_yaw_comp_gain);
 	}
 
 	if (_param_roll_comp_gain_h != PARAM_INVALID) {
@@ -86,81 +153,32 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 		return;
 	}
 
+	if ((msg.flags & dronecan::formation::ControlInput::FLAG_VALID) == 0) {
+		return;
+	}
+
+	if (_formation_position != FORMATION_POSITION_LEFT && _formation_position != FORMATION_POSITION_RIGHT) {
+		return;
+	}
+
+	// 获取从机自身姿态与角速度，用于自稳补偿
 	if (_vehicle_attitude_sub.updated()) {
 		_vehicle_attitude_sub.copy(&_vehicle_attitude);
 	}
 
+	vehicle_angular_velocity_s angular_velocity{};
+	_vehicle_angular_velocity_sub.copy(&angular_velocity);
+
+	// 取出从机自身 roll / pitch / yaw_rate 进行补偿
 	matrix::Quatf q(_vehicle_attitude.q);
 	matrix::Eulerf euler(q);
-	float self_roll = euler.phi();
-
-	// 解码 ArrayCommand 消息
-	float roll = 0.0f;
-	float pitch = 0.0f;
-	float yaw = 0.0f;
-	float thrust_x = 0.5f; // 默认 50% 油门
-	float thrust_y = 0.0f;
-	float thrust_z = 0.0f;
-	uint8_t formation_position = 0;
-
-	for (const auto &cmd : msg.commands) {
-		switch (cmd.actuator_id) {
-		case 100: // 滚转速率
-			if (cmd.command_type == uavcan::equipment::actuator::Command::COMMAND_TYPE_SPEED) {
-				roll = cmd.command_value;
-			}
-			break;
-
-		case 101: // 俯仰速率（主控制通道）
-			if (cmd.command_type == uavcan::equipment::actuator::Command::COMMAND_TYPE_SPEED) {
-				pitch = cmd.command_value;
-			}
-			break;
-
-		case 102: // 偏航速率
-			if (cmd.command_type == uavcan::equipment::actuator::Command::COMMAND_TYPE_SPEED) {
-				yaw = cmd.command_value;
-			}
-			break;
-
-		case 103: // 前向推力
-			if (cmd.command_type == uavcan::equipment::actuator::Command::COMMAND_TYPE_UNITLESS) {
-				thrust_x = cmd.command_value;
-			}
-			break;
-
-		case 104: // 横向推力
-			if (cmd.command_type == uavcan::equipment::actuator::Command::COMMAND_TYPE_UNITLESS) {
-				thrust_y = cmd.command_value;
-			}
-			break;
-
-		case 105: // 垂向推力
-			if (cmd.command_type == uavcan::equipment::actuator::Command::COMMAND_TYPE_UNITLESS) {
-				thrust_z = cmd.command_value;
-			}
-			break;
-
-		case 110: // 编队位置标识
-			formation_position = static_cast<uint8_t>(cmd.command_value);
-			break;
-
-		default:
-			// 忽略未知 actuator_id
-			break;
-		}
-	}
-
-	// 重新加载位置参数
-	if (_param_formation_position_h != PARAM_INVALID) {
-		param_get(_param_formation_position_h, &_formation_position);
-	}
-
-	// 验证指令是否属于本机
-	if (_formation_position == 0 || formation_position != _formation_position) {
-		// 不是发给本机的指令，忽略
-		return;
-	}
+	const float self_roll = euler.phi();
+	const float self_pitch = euler.theta();
+	const float self_yaw_rate = angular_velocity.xyz[2];
+	const float side_sign = (_formation_position == FORMATION_POSITION_LEFT) ? 1.0f : -1.0f;
+	const float base_thrust = math::constrain((static_cast<float>(msg.throttle) + 1.0f) * 0.5f, 0.0f, 1.0f);
+	const float yaw_for_boost = (_formation_position == FORMATION_POSITION_LEFT) ?
+		math::max(static_cast<float>(msg.yaw), 0.0f) : math::max(-static_cast<float>(msg.yaw), 0.0f);
 
 	_last_command_time = hrt_absolute_time();
 
@@ -174,15 +192,24 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	offboard_mode.body_rate = true;
 	_offboard_control_mode_pub.publish(offboard_mode);
 
-	// 发布 vehicle_rates_setpoint 给速率控制器
+// 主要控制逻辑
 	vehicle_rates_setpoint_s rates_sp{};
 	rates_sp.timestamp = _last_command_time;
-	rates_sp.roll = _roll_comp_gain * (roll - self_roll);
-	rates_sp.pitch = pitch;
-	rates_sp.yaw = yaw;
-	rates_sp.thrust_body[0] = thrust_x;
-	rates_sp.thrust_body[1] = thrust_y;
-	rates_sp.thrust_body[2] = thrust_z;
+
+	// 滚转：系数 x (遥控输入 - 自身滚转)
+	rates_sp.roll = _roll_comp_gain * (static_cast<float>(msg.roll) - self_roll);
+
+	// 俯仰：左右机系数(±) x 滚转映射 + 俯仰同步 - 自身 pitch 补偿
+	rates_sp.pitch = side_sign * static_cast<float>(msg.roll) * _roll_to_pitch_gain + static_cast<float>(msg.pitch) * _pitch_sync - self_pitch * _pitch_comp_gain;
+
+	 // 偏航：主机偏航同步系数 x 遥控输入 - 自身 yaw_rate 阻尼补偿
+	rates_sp.yaw = static_cast<float>(msg.yaw) * _yaw_sync - self_yaw_rate * _yaw_comp_gain;
+
+	// 推力：基础油门 + 外侧机增量
+	rates_sp.thrust_body[0] = math::constrain(base_thrust + yaw_for_boost * _yaw_throttle_gain, 0.0f, 1.0f);
+	rates_sp.thrust_body[1] = 0.0f;
+	rates_sp.thrust_body[2] = 0.0f;
+	rates_sp.reset_integral = (msg.flags & dronecan::formation::ControlInput::FLAG_RESET_INTEGRAL) != 0;
 	_vehicle_rates_setpoint_pub.publish(rates_sp);
 }
 

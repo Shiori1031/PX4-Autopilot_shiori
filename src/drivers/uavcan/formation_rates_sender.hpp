@@ -34,28 +34,17 @@
 #pragma once
 
 #include <uavcan/uavcan.hpp>
-#include <uavcan/equipment/actuator/ArrayCommand.hpp>
+#include <dronecan/formation/ControlInput.hpp>
 
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
 
-#include <parameters/param.h>
-
 /**
- * @brief 编队速率发送器（集成控制解算逻辑）
+ * @brief 编队控制输入发送器
  *
- * 直接订阅 manual_control_setpoint，内部计算编队速率指令，
- * 通过 UAVCAN ArrayCommand 广播到左右从机。
- *
- * 无需独立的 formation_master 模块。
- *
- * 编码格式：
- *   actuator_id 100 = 滚转速率 (rad/s)
- *   actuator_id 101 = 俯仰速率 (rad/s) - 主控制通道
- *   actuator_id 102 = 偏航速率 (rad/s)
- *   actuator_id 103 = 前向推力
- *   actuator_id 110 = 编队位置 (1=左机, 2=右机)
+ * 直接订阅 manual_control_setpoint，将主机遥控器四个归一化输入
+ * （油门/偏航/滚转/俯仰）封装为自定义 DroneCAN 消息广播给从机。
  */
 class FormationRatesSender
 {
@@ -63,34 +52,21 @@ public:
 	FormationRatesSender(uavcan::INode &node);
 
 	/**
-	 * 初始化周期发布器并加载参数
+	 * 初始化周期发布器
 	 */
 	int init();
 
 private:
-	static constexpr unsigned MAX_RATE_HZ = 200;  // 200Hz 更新频率
+	static constexpr unsigned MAX_RATE_HZ = 300; // 发布频率上限
 
 	void periodic_update(const uavcan::TimerEvent &);
-	void update_params();
 
 	typedef uavcan::MethodBinder<FormationRatesSender *, void (FormationRatesSender::*)(const uavcan::TimerEvent &)>
-	TimerCbBinder;
+		TimerCbBinder;
 
-	uavcan::Publisher<uavcan::equipment::actuator::ArrayCommand> _publisher;
+	uavcan::Publisher<dronecan::formation::ControlInput> _publisher;
 	uavcan::TimerEventForwarder<TimerCbBinder> _timer;
 
-	// 输入数据订阅
 	uORB::Subscription _manual_sub{ORB_ID(manual_control_setpoint)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
-
-	// 参数句柄
-	param_t _param_roll_to_pitch_gain_h;
-	param_t _param_yaw_coupling_h;
-	param_t _param_throttle_diff_h;
-	param_t _param_pitch_sync_h;
-	// 参数缓存值
-	float _roll_to_pitch_gain{2.0f};		// 横滚到俯仰映射增益
-	float _yaw_coupling{0.3f};		// 偏航耦合系数
-	float _throttle_diff{0.05f};		// 油门差异
-	float _pitch_sync{0.1f};		// 俯仰同步系数
 };

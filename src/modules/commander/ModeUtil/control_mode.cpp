@@ -54,7 +54,7 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 		vehicle_control_mode.flag_control_rates_enabled = stabilization_required(vehicle_type);
 		vehicle_control_mode.flag_control_allocation_enabled = true;
 		break;
-
+	// stabilized modes
 	case vehicle_status_s::NAVIGATION_STATE_STAB:
 		vehicle_control_mode.flag_control_manual_enabled = true;
 		vehicle_control_mode.flag_control_attitude_enabled = true;
