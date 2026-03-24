@@ -165,9 +165,13 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 		return;
 	}
 
-	// 获取从机自身姿态与角速度，用于自稳补偿
+	// 获取从机自身姿态与飞行模式，用于自稳补偿与接管门控
 	if (_vehicle_attitude_sub.updated()) {
 		_vehicle_attitude_sub.copy(&_vehicle_attitude);
+	}
+
+	if (_vehicle_status_sub.updated()) {
+		_vehicle_status_sub.copy(&_vehicle_status);
 	}
 
 	// 取出从机自身 roll / pitch 进行补偿
@@ -191,6 +195,11 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	offboard_mode.attitude = false;
 	offboard_mode.body_rate = true;
 	_offboard_control_mode_pub.publish(offboard_mode);
+
+	// 如果当前不是 Offboard 直接退出这次回调
+	if (_vehicle_status.nav_state != vehicle_status_s::NAVIGATION_STATE_OFFBOARD) {
+		return;
+	}
 
 // 从机主要控制逻辑
 	vehicle_rates_setpoint_s rates_sp{};

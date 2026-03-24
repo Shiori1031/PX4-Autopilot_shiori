@@ -238,7 +238,7 @@ reboot
 主机侧建议先确认输入源正常：
 
 ```bash
-liste·ner manual_control_setpoint 5
+listener manual_control_setpoint -r 5 -n 20
 ```
 
 拨动遥控器时，应能看到 `throttle/yaw/roll/pitch` 持续变化，范围通常在 `[-1, 1]`。
@@ -247,8 +247,8 @@ liste·ner manual_control_setpoint 5
 
 ```bash
 uavcan status
-listener offboard_control_mode 5
-listener vehicle_rates_setpoint 5
+listener offboard_control_mode -r 5 -n 20
+listener vehicle_rates_setpoint -r 5 -n 20
 ```
 
 判断标准：

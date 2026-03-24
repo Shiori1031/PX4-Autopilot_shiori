@@ -45,6 +45,7 @@
 #include <uORB/topics/offboard_control_mode.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
+#include <uORB/topics/vehicle_status.h>
 #include <parameters/param.h>
 #include <matrix/math.hpp>
 
@@ -82,7 +83,9 @@ private:
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
 	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
+	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	vehicle_attitude_s _vehicle_attitude{};
+	vehicle_status_s _vehicle_status{};
 
 	hrt_abstime _last_command_time{0};
 
