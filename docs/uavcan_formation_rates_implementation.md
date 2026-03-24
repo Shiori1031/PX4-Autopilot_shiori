@@ -231,6 +231,38 @@ reboot
 
 从机进入 Offboard 后，接收器会持续发送 body-rate 控制心跳。
 
+### 6.4 传输验证方法
+
+可以用 PX4 shell 里的 `listener` 配合 `uavcan status` 做链路验证。需要注意：`listener` 观察的是 PX4 内部 uORB 主题，不是直接抓原始 CAN 帧；因此它更适合验证"消息已经被正确接收并转换为控制量"。
+
+主机侧建议先确认输入源正常：
+
+```bash
+liste·ner manual_control_setpoint 5
+```
+
+拨动遥控器时，应能看到 `throttle/yaw/roll/pitch` 持续变化，范围通常在 `[-1, 1]`。
+
+从机侧建议依次检查：
+
+```bash
+uavcan status
+listener offboard_control_mode 5
+listener vehicle_rates_setpoint 5
+```
+
+判断标准：
+- `uavcan status` 能看到主机节点在线，且总线没有明显错误累积。
+- 主机拨杆后，`offboard_control_mode` 应持续更新，并看到 `body_rate = true`。
+- 主机拨杆后，`vehicle_rates_setpoint` 应持续更新；其中 `roll/pitch/yaw/thrust_body[0]` 会随主机输入和从机 `FORM_POSITION` 发生对应变化。
+- 若主机不动杆，仍可能看到少量自稳补偿输出，这是从机姿态补偿在工作，不一定是异常。
+
+如果 `listener vehicle_rates_setpoint` 没有更新，优先检查：
+- 主机是否已开启 `UAVCAN_PUB_FORM=1`。
+- 从机是否已开启 `UAVCAN_SUB_FORM=1` 和 `FORM_FOLLOWER_EN=1`。
+- 左右从机 `FORM_POSITION` 是否分别设为 `1/2`。
+- 主从机 `UAVCAN_NODE_ID` 是否冲突，且 `uavcan status` 是否能看到对端在线。
+
 ## 7. 7-nano 相关接入
 
 `cuav_7-nano_default` 已开启以下板级配置：

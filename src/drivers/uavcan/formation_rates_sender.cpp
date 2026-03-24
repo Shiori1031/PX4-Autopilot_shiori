@@ -64,8 +64,7 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 		return;
 	}
 
-	if (!PX4_ISFINITE(manual.throttle) || !PX4_ISFINITE(manual.yaw)
-	    || !PX4_ISFINITE(manual.roll) || !PX4_ISFINITE(manual.pitch)) {
+	if (!PX4_ISFINITE(manual.throttle) || !PX4_ISFINITE(manual.yaw) || !PX4_ISFINITE(manual.roll) || !PX4_ISFINITE(manual.pitch)) {
 		return;
 	}
 
