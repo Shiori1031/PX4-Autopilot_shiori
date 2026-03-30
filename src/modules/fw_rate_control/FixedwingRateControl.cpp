@@ -49,6 +49,8 @@ FixedwingRateControl::FixedwingRateControl(bool vtol) :
 	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle"))
 {
 	_handle_param_vt_fw_difthr_en = param_find("VT_FW_DIFTHR_EN");
+	_handle_param_form_follower_en = param_find("FORM_FOLLOWER_EN");
+	_handle_param_form_yaw_k = param_find("FORM_YAW_K");
 
 	/* fetch initial parameter values */
 	parameters_update();
@@ -86,6 +88,14 @@ FixedwingRateControl::parameters_update()
 
 	if (_handle_param_vt_fw_difthr_en != PARAM_INVALID) {
 		param_get(_handle_param_vt_fw_difthr_en, &_param_vt_fw_difthr_en);
+	}
+
+	if (_handle_param_form_follower_en != PARAM_INVALID) {
+		param_get(_handle_param_form_follower_en, &_param_form_follower_en);
+	}
+
+	if (_handle_param_form_yaw_k != PARAM_INVALID) {
+		param_get(_handle_param_form_yaw_k, &_param_form_yaw_k);
 	}
 
 
@@ -395,8 +405,15 @@ void FixedwingRateControl::Run()
 					trim.copyTo(_vehicle_torque_setpoint.xyz);
 				}
 
-				/* throttle passed through if it is finite */
-				_vehicle_thrust_setpoint.xyz[0] = PX4_ISFINITE(_rates_sp.thrust_body[0]) ? _rates_sp.thrust_body[0] : 0.0f;
+				/*
+				 * throttle passed through if it is finite, with yaw boost compensation for master only
+				 *
+				 * - FORM_FOLLOWER_EN: 主机0; 从机1
+				 * 先判断推力设定值是不是正常有限数
+				 * 主机侧在固定翼速率控制输出阶段额外叠加一项偏航同步加速：
+				 *   thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K
+				 */
+				_vehicle_thrust_setpoint.xyz[0] = PX4_ISFINITE(_rates_sp.thrust_body[0]) ? math::constrain(_rates_sp.thrust_body[0] + ((_param_form_follower_en == 0) ? 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k : 0.0f), 0.f, 1.f) : 0.0f;
 
 				/* scale effort by battery status */
 				if (_param_fw_bat_scale_en.get() && _vehicle_thrust_setpoint.xyz[0] > 0.1f) {

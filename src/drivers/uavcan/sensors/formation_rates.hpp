@@ -88,11 +88,24 @@ private:
 	vehicle_status_s _vehicle_status{};
 
 	hrt_abstime _last_command_time{0};
+	hrt_abstime _last_debug_print_time{0};
 
 	param_t _param_follower_enable_h;
 	param_t _param_formation_position_h;
 	param_t _param_roll_to_pitch_gain_h;
 	param_t _param_yaw_throttle_gain_h;
+	param_t _param_roll_rel_offset_h;
+	param_t _param_pitch_rel_offset_h;
+	param_t _param_yaw_rel_offset_h;
+	param_t _param_roll_kp_h;
+	param_t _param_roll_kd_h;
+	param_t _param_pitch_kp_h;
+	param_t _param_pitch_kd_h;
+	param_t _param_yaw_kp_h;
+	param_t _param_yaw_kd_h;
+	param_t _param_roll_rate_max_h;
+	param_t _param_pitch_rate_max_h;
+	param_t _param_yaw_rate_max_h;
 	param_t _param_pitch_sync_h;
 	param_t _param_pitch_comp_gain_h;
 	param_t _param_yaw_sync_h;
@@ -103,6 +116,18 @@ private:
 	int32_t _formation_position{0};
 	float _roll_to_pitch_gain{2.0f};
 	float _yaw_throttle_gain{0.05f};
+	float _roll_rel_offset{0.0f};
+	float _pitch_rel_offset{0.0f};
+	float _yaw_rel_offset{0.0f};
+	float _roll_kp{2.0f};
+	float _roll_kd{0.3f};
+	float _pitch_kp{2.0f};
+	float _pitch_kd{0.3f};
+	float _yaw_kp{2.0f};
+	float _yaw_kd{0.3f};
+	float _roll_rate_max{1.22f};
+	float _pitch_rate_max{1.05f};
+	float _yaw_rate_max{0.87f};
 	float _pitch_sync{1.0f};
 	float _pitch_comp_gain{1.0f};
 	float _yaw_sync{1.0f};

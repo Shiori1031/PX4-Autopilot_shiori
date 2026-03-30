@@ -583,6 +583,157 @@ PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
 PARAM_DEFINE_FLOAT(FORM_ROLL_COMP, 2.0f);
 
 /**
+ * Relative roll offset for follower tracking
+ *
+ * Desired roll offset relative to the leader.
+ *
+ * @unit rad
+ * @min -1.57
+ * @max 1.57
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_OFS, 0.0f);
+
+/**
+ * Relative pitch offset for follower tracking
+ *
+ * Desired pitch offset magnitude relative to the leader.
+ * Left/right followers apply opposite signs internally.
+ *
+ * @unit rad
+ * @min -1.57
+ * @max 1.57
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PITCH_OFS, 0.0f);
+
+/**
+ * Relative yaw offset for follower tracking
+ *
+ * Desired yaw offset relative to the leader.
+ *
+ * @unit rad
+ * @min -3.14
+ * @max 3.14
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_OFS, 0.0f);
+
+/**
+ * Relative roll attitude proportional gain
+ *
+ * @unit 1/s
+ * @min 0.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_KP, 2.0f);
+
+/**
+ * Relative roll rate damping gain
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_KD, 0.3f);
+
+/**
+ * Relative pitch attitude proportional gain
+ *
+ * @unit 1/s
+ * @min 0.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PITCH_KP, 2.0f);
+
+/**
+ * Relative pitch rate damping gain
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PITCH_KD, 0.3f);
+
+/**
+ * Relative yaw attitude proportional gain
+ *
+ * @unit 1/s
+ * @min 0.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_KP, 2.0f);
+
+/**
+ * Relative yaw rate damping gain
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 10.0
+ * @decimal 2
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_KD, 0.3f);
+
+/**
+ * Maximum follower roll rate setpoint
+ *
+ * @unit rad/s
+ * @min 0.1
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_RMAX, 1.22f);
+
+/**
+ * Maximum follower pitch rate setpoint
+ *
+ * @unit rad/s
+ * @min 0.1
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PTCH_RMAX, 1.05f);
+
+/**
+ * Maximum follower yaw rate setpoint
+ *
+ * @unit rad/s
+ * @min 0.1
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_RMAX, 0.87f);
+
+/**
  * Yaw throttle boost coefficient
  *
  * Additional throttle applied to the outer follower during yaw maneuvers.
