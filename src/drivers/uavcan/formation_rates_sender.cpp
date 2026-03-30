@@ -36,6 +36,7 @@
 #include <drivers/drv_hrt.h>
 #include <lib/mathlib/mathlib.h>
 #include <px4_platform_common/defines.h>
+#include <matrix/math.hpp>
 
 FormationRatesSender::FormationRatesSender(uavcan::INode &node) :
 	_publisher(node),
@@ -74,12 +75,27 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 	if (status.vehicle_type != vehicle_status_s::VEHICLE_TYPE_FIXED_WING && !status.in_transition_mode) {
 		return;
 	}
-	// 将manual输入封装到自定义的DroneCAN消息: dronecan::formation::ControlInput 中
+
+	vehicle_attitude_s vehicle_attitude{};
+	_vehicle_attitude_sub.copy(&vehicle_attitude);
+	matrix::Quatf q_att(vehicle_attitude.q);
+	matrix::Eulerf euler_att(q_att);
+
+	vehicle_angular_velocity_s angular_velocity{};
+	_vehicle_angular_velocity_sub.copy(&angular_velocity);
+
+	// 将 manual、主机姿态角与 p/q/r 一并封装到自定义 DroneCAN 消息中
 	dronecan::formation::ControlInput msg;
 	msg.throttle = math::constrain(manual.throttle, -1.0f, 1.0f);
 	msg.yaw = math::constrain(manual.yaw, -1.0f, 1.0f);
 	msg.roll = math::constrain(manual.roll, -1.0f, 1.0f);
 	msg.pitch = math::constrain(manual.pitch, -1.0f, 1.0f);
+	msg.att_roll = euler_att.phi();
+	msg.att_pitch = euler_att.theta();
+	msg.att_yaw = euler_att.psi();
+	msg.p = angular_velocity.xyz[0];
+	msg.q = angular_velocity.xyz[1];
+	msg.r = angular_velocity.xyz[2];
 	msg.flags = dronecan::formation::ControlInput::FLAG_VALID;
 
 	if (manual.sticks_moving) {

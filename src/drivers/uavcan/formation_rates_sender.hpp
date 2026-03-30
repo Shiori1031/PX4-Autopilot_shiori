@@ -39,6 +39,8 @@
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_angular_velocity.h>
 
 /**
  * @brief 编队控制输入发送器
@@ -69,4 +71,6 @@ private:
 
 	uORB::Subscription _manual_sub{ORB_ID(manual_control_setpoint)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
+	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
 };
