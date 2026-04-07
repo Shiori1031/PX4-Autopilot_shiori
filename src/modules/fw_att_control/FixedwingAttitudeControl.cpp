@@ -160,7 +160,7 @@ FixedwingAttitudeControl::vehicle_manual_poll(const float yaw_body)
 
 void
 FixedwingAttitudeControl::vehicle_attitude_setpoint_poll()
-{//姿态注入点
+{//姿态注入点：推力部分
 	if (_att_sp_sub.update(&_att_sp)) {
 		_rates_sp.thrust_body[0] = _att_sp.thrust_body[0];
 		_rates_sp.thrust_body[1] = _att_sp.thrust_body[1];
@@ -330,11 +330,11 @@ void FixedwingAttitudeControl::Run()
 				_rates_sp.reset_integral = false;
 			}
 
-// 姿态控制器调用（角度→角速率）
-			/* Run attitude controllers */
+// 姿态控制器调用（角度 --> 角速率）
 			// 姿态控制器调用
+			// 姿态注入点
 			if (_vcontrol_mode.flag_control_attitude_enabled && _in_fw_or_transition_wo_tailsitter_transition) {
-				const Quatf q_sp(_att_sp.q_d);
+				const Quatf q_sp(_att_sp.q_d);//取出姿态设定值四元数
 
 				if (q_sp.isAllFinite()) {
 					const Eulerf euler_sp(q_sp);
@@ -353,7 +353,7 @@ void FixedwingAttitudeControl::Run()
 					_yaw_ctrl.control_yaw(roll_sp, _pitch_ctrl.get_euler_rate_setpoint(), euler_angles.phi(),
 							      euler_angles.theta(), get_airspeed_constrained());
 
-// 角速率设定值组装
+// 姿态转换角速率
 					/* Update input data for rate controllers */
 					Vector3f body_rates_setpoint = Vector3f(_roll_ctrl.get_body_rate_setpoint(), _pitch_ctrl.get_body_rate_setpoint(),
 										_yaw_ctrl.get_body_rate_setpoint());
@@ -395,7 +395,7 @@ void FixedwingAttitudeControl::Run()
 					_rates_sp.yaw = body_rates_setpoint(2);
 
 					_rates_sp.timestamp = hrt_absolute_time();
-
+// 角速率注入点
 					_rate_sp_pub.publish(_rates_sp);
 				}
 			}

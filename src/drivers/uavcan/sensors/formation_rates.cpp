@@ -56,10 +56,13 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	_param_roll_rel_offset_h = param_find("FORM_ROLL_OFS");
 	_param_pitch_rel_offset_h = param_find("FORM_PITCH_OFS");
 	_param_yaw_rel_offset_h = param_find("FORM_YAW_OFS");
+	_param_roll_ff_h = param_find("FORM_ROLL_FF");
 	_param_roll_kp_h = param_find("FORM_ROLL_KP");
 	_param_roll_kd_h = param_find("FORM_ROLL_KD");
+	_param_pitch_ff_h = param_find("FORM_PITCH_FF");
 	_param_pitch_kp_h = param_find("FORM_PITCH_KP");
 	_param_pitch_kd_h = param_find("FORM_PITCH_KD");
+	_param_yaw_ff_h = param_find("FORM_YAW_FF");
 	_param_yaw_kp_h = param_find("FORM_YAW_KP");
 	_param_yaw_kd_h = param_find("FORM_YAW_KD");
 	_param_roll_rate_max_h = param_find("FORM_ROLL_RMAX");
@@ -103,6 +106,10 @@ int FormationRatesBridge::init()
 		param_get(_param_yaw_rel_offset_h, &_yaw_rel_offset);
 	}
 
+	if (_param_roll_ff_h != PARAM_INVALID) {
+		param_get(_param_roll_ff_h, &_roll_ff);
+	}
+
 	if (_param_roll_kp_h != PARAM_INVALID) {
 		param_get(_param_roll_kp_h, &_roll_kp);
 	}
@@ -111,12 +118,20 @@ int FormationRatesBridge::init()
 		param_get(_param_roll_kd_h, &_roll_kd);
 	}
 
+	if (_param_pitch_ff_h != PARAM_INVALID) {
+		param_get(_param_pitch_ff_h, &_pitch_ff);
+	}
+
 	if (_param_pitch_kp_h != PARAM_INVALID) {
 		param_get(_param_pitch_kp_h, &_pitch_kp);
 	}
 
 	if (_param_pitch_kd_h != PARAM_INVALID) {
 		param_get(_param_pitch_kd_h, &_pitch_kd);
+	}
+
+	if (_param_yaw_ff_h != PARAM_INVALID) {
+		param_get(_param_yaw_ff_h, &_yaw_ff);
 	}
 
 	if (_param_yaw_kp_h != PARAM_INVALID) {
@@ -204,6 +219,10 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 			param_get(_param_yaw_rel_offset_h, &_yaw_rel_offset);
 		}
 
+		if (_param_roll_ff_h != PARAM_INVALID) {
+			param_get(_param_roll_ff_h, &_roll_ff);
+		}
+
 		if (_param_roll_kp_h != PARAM_INVALID) {
 			param_get(_param_roll_kp_h, &_roll_kp);
 		}
@@ -212,12 +231,20 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 			param_get(_param_roll_kd_h, &_roll_kd);
 		}
 
+		if (_param_pitch_ff_h != PARAM_INVALID) {
+			param_get(_param_pitch_ff_h, &_pitch_ff);
+		}
+
 		if (_param_pitch_kp_h != PARAM_INVALID) {
 			param_get(_param_pitch_kp_h, &_pitch_kp);
 		}
 
 		if (_param_pitch_kd_h != PARAM_INVALID) {
 			param_get(_param_pitch_kd_h, &_pitch_kd);
+		}
+
+		if (_param_yaw_ff_h != PARAM_INVALID) {
+			param_get(_param_yaw_ff_h, &_yaw_ff);
 		}
 
 		if (_param_yaw_kp_h != PARAM_INVALID) {
@@ -348,20 +375,19 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	const float e_pitch = (leader_pitch + pitch_rel_des) - self_pitch;
 	const float e_yaw = matrix::wrap_pi((leader_yaw + yaw_rel_des) - self_yaw);
 
-// 1. 相对姿态 + 主机 p/q/r 前馈 + 相对速率阻尼
-	// 滚转：主机 p 前馈 + 相对姿态反馈(P x roll误差) + 相对速率阻尼(D x rate误差)
-	const float relative_roll_sp = leader_p + _roll_kp * e_roll + _roll_kd * (leader_p - self_roll_rate);
+// 1. 相对姿态 + 主机 p/q/r 显式前馈 + 相对速率误差阻尼
+	// 滚转：显式 leader p 前馈 + 相对姿态反馈(P x roll误差) + 相对速率误差阻尼(D x rate误差)
+	const float relative_roll_corr = _roll_ff * leader_p + _roll_kp * e_roll + _roll_kd * (leader_p - self_roll_rate);
 
-	// 俯仰：主机 q 前馈 + 相对姿态反馈(P x pitch误差) + 相对速率阻尼(D x rate误差) + roll-pitch 耦合
+	// 俯仰：显式 leader q 前馈 + 相对姿态反馈(P x pitch误差) + 相对速率误差阻尼(D x rate误差)
 	// 从机的俯仰影响整体滚转，side_sign 区分左右机进行反向俯仰
-	const float relative_pitch_sp = leader_q + _pitch_kp * e_pitch + _pitch_kd * (leader_q - self_pitch_rate)
-				 + side_sign * _roll_to_pitch_gain * e_roll;
+	const float relative_pitch_corr = _pitch_ff * leader_q + _pitch_kp * e_pitch + _pitch_kd * (leader_q - self_pitch_rate);
 
-	// 偏航：主机 r 前馈 + 相对姿态反馈(P x yaw误差) + 相对速率阻尼(D x rate误差)
+	// 偏航：显式 leader r 前馈 + 相对姿态反馈(P x yaw误差) + 相对速率误差阻尼(D x rate误差)
 	// 偏航方向舵都同向偏转，(rates_sp.yaw: 机体系 z 轴偏航角速度设定值)
-	const float relative_yaw_sp = leader_r + _yaw_kp * e_yaw + _yaw_kd * (leader_r - self_yaw_rate);
+	const float relative_yaw_corr = _yaw_ff * leader_r + _yaw_kp * e_yaw + _yaw_kd * (leader_r - self_yaw_rate);
 
-// 2. PID 改造前的上一版遥控器直接控制逻辑
+// 2. 遥控器直接控制逻辑
 	// 滚转：系数 x (遥控输入 - 自身滚转); default MAX: ±1.22 rad/s
 	const float stick_roll_sp = _roll_comp_gain * (static_cast<float>(msg.roll) - self_roll);
 
@@ -372,12 +398,14 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	// 偏航：主机偏航同步系数 x 遥控输入 - 自身 yaw_rate 阻尼补偿; default MAX: ±0.87 rad/s
 	const float stick_yaw_sp = static_cast<float>(msg.yaw) * _yaw_sync - self_yaw_rate * _yaw_comp_gain;
 
-// 加权融合
-	constexpr float relative_ctrl_weight = 0.5f;
-	constexpr float stick_ctrl_weight = 0.5f;
-	rates_sp.roll = relative_ctrl_weight * relative_roll_sp + stick_ctrl_weight * stick_roll_sp;
-	rates_sp.pitch = relative_ctrl_weight * relative_pitch_sp + stick_ctrl_weight * stick_pitch_sp;
-	rates_sp.yaw = relative_ctrl_weight * relative_yaw_sp + stick_ctrl_weight * stick_yaw_sp;
+// 加权融合：目前依旧以遥控器输入为主，相对姿态控制太慢，当作辅助通道；pitch：最敏感设0.15
+	constexpr float stick_ctrl_weight = 1.0f;
+	constexpr float relative_ctrl_roll_weight = 0.3f;
+	constexpr float relative_ctrl_pitch_weight = 0.15f;
+	constexpr float relative_ctrl_yaw_weight = 0.3f;
+	rates_sp.roll = stick_ctrl_weight * stick_roll_sp + relative_ctrl_roll_weight * relative_roll_corr;
+	rates_sp.pitch = stick_ctrl_weight * stick_pitch_sp + relative_ctrl_pitch_weight * relative_pitch_corr;
+	rates_sp.yaw = stick_ctrl_weight * stick_yaw_sp + relative_ctrl_yaw_weight * relative_yaw_corr;
 
 	// 限幅：参考 PX4 fixed-wing 原生默认 rate setpoint 上限
 	rates_sp.roll = math::constrain(rates_sp.roll, -_roll_rate_max, _roll_rate_max);

@@ -50,6 +50,7 @@ FixedwingRateControl::FixedwingRateControl(bool vtol) :
 {
 	_handle_param_vt_fw_difthr_en = param_find("VT_FW_DIFTHR_EN");
 	_handle_param_form_follower_en = param_find("FORM_FOLLOWER_EN");
+	_handle_param_uavcan_pub_form = param_find("UAVCAN_PUB_FORM");
 	_handle_param_form_yaw_k = param_find("FORM_YAW_K");
 
 	/* fetch initial parameter values */
@@ -92,6 +93,10 @@ FixedwingRateControl::parameters_update()
 
 	if (_handle_param_form_follower_en != PARAM_INVALID) {
 		param_get(_handle_param_form_follower_en, &_param_form_follower_en);
+	}
+
+	if (_handle_param_uavcan_pub_form != PARAM_INVALID) {
+		param_get(_handle_param_uavcan_pub_form, &_param_uavcan_pub_form);
 	}
 
 	if (_handle_param_form_yaw_k != PARAM_INVALID) {
@@ -406,14 +411,16 @@ void FixedwingRateControl::Run()
 				}
 
 				/*
-				 * throttle passed through if it is finite, with yaw boost compensation for master only
+				 * throttle passed through if it is finite, with yaw boost compensation only when
+				 * this vehicle is the leader and the formation publisher is enabled
 				 *
 				 * - FORM_FOLLOWER_EN: 主机0; 从机1
+				 * - UAVCAN_PUB_FORM: 编队控制广播开关，主机发送时应为1
 				 * 先判断推力设定值是不是正常有限数
 				 * 主机侧在固定翼速率控制输出阶段额外叠加一项偏航同步加速：
 				 *   thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K
 				 */
-				_vehicle_thrust_setpoint.xyz[0] = PX4_ISFINITE(_rates_sp.thrust_body[0]) ? math::constrain(_rates_sp.thrust_body[0] + ((_param_form_follower_en == 0) ? 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k : 0.0f), 0.f, 1.f) : 0.0f;
+				_vehicle_thrust_setpoint.xyz[0] = PX4_ISFINITE(_rates_sp.thrust_body[0]) ? math::constrain(_rates_sp.thrust_body[0] + (((_param_form_follower_en == 0) && (_param_uavcan_pub_form == 1)) ? 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k : 0.0f), 0.f, 1.f) : 0.0f;
 
 				/* scale effort by battery status */
 				if (_param_fw_bat_scale_en.get() && _vehicle_thrust_setpoint.xyz[0] > 0.1f) {

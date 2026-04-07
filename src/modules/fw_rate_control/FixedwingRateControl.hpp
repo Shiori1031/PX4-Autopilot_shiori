@@ -159,8 +159,10 @@ private:
 	param_t _handle_param_vt_fw_difthr_en{PARAM_INVALID};
 	int32_t _param_vt_fw_difthr_en{0};
 	param_t _handle_param_form_follower_en{PARAM_INVALID};
+	param_t _handle_param_uavcan_pub_form{PARAM_INVALID};
 	param_t _handle_param_form_yaw_k{PARAM_INVALID};
 	int32_t _param_form_follower_en{0};
+	int32_t _param_uavcan_pub_form{0};
 	float _param_form_yaw_k{0.0f};
 
 	DEFINE_PARAMETERS(

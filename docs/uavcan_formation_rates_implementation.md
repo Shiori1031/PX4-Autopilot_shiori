@@ -4,7 +4,7 @@
 
 为 PX4 新增了一套基于 UAVCAN 的编队速率控制功能，用于三机刚性连接编队飞行系统。中央主飞控读取遥控器输入，同时广播主机实际姿态角与机体系角速度；左右从飞控按各自 `FORM_POSITION` 在本地完成控制解算，然后在 Offboard body-rate 模式下执行。
 
-当前实现面向 `cuav_7-nano_default`，相关功能已经通过板级配置编进固件。
+当前实现面向 `make cuav_7-nano_default`，相关功能已经通过板级配置编进固件。
 
 核心机制：
 
@@ -75,13 +75,13 @@ _manual_sub.copy(&manual);
 
 ## 4. 当前控制映射关系
 
-控制方式: “主机姿态/角速度前馈 + 相对姿态误差反馈 + 相对速率阻尼” 与 “上一版遥控器直接控制逻辑” 按固定权重融合
+控制方式: 以“上一版遥控器直接控制逻辑”为主控制通道，同时叠加“主机姿态/角速度显式前馈 + 相对姿态误差反馈 + 相对速率误差阻尼”作为辅助修正通道
 
 因此：
-- 从机 `roll / pitch / yaw` 速率设定值由两部分共同决定：
-  1. 主机实际姿态角、主机 `p/q/r`、从机自身姿态角和从机自身 `p/q/r` 构成的相对姿态控制部分。
+- 从机 `roll / pitch / yaw` 速率设定值由两部分共同决定，但当前以遥控器直接控制部分为主：
+  1. 主机实际姿态角、主机 `p/q/r`、从机自身姿态角和从机自身角速度构成的相对姿态辅助修正部分。
   2. 改为相对姿态 PID 控制前的上一版“遥控器直接控制”部分。
-- `FORM_R2P_GAIN` 当前承担 `roll -> pitch` 的耦合作用，用来把整体滚转误差转为左右从机反向俯仰。
+- `FORM_R2P_GAIN` 当前承担 `roll -> pitch` 的耦合作用，在遥控器主控支路中把主机滚转输入映射为左右从机反向俯仰。
 - `FORM_YAW_K` 当前同时承担两部分作用：从机侧偏航时外侧机附加油门，以及主机侧偏航时同步加速。
 - 从机控制链只有在自身飞行模式已经切入 Offboard 时才真正接管。
 
@@ -115,18 +115,17 @@ e_yaw   = wrap_pi((leader_yaw + yaw_rel_des) - self_yaw)
 从机速率设定值先分别计算两部分：
 
 ```text
-relative_roll_sp  = leader_p
-                  + FORM_ROLL_KP * e_roll
-                  + FORM_ROLL_KD * (leader_p - self_roll_rate)
+relative_roll_corr  = FORM_ROLL_FF * leader_p
+                    + FORM_ROLL_KP * e_roll
+                    + FORM_ROLL_KD * (leader_p - self_roll_rate)
 
-relative_pitch_sp = leader_q
-                  + FORM_PITCH_KP * e_pitch
-                  + FORM_PITCH_KD * (leader_q - self_pitch_rate)
-                  + side_sign * FORM_R2P_GAIN * e_roll
+relative_pitch_corr = FORM_PITCH_FF * leader_q
+                    + FORM_PITCH_KP * e_pitch
+                    + FORM_PITCH_KD * (leader_q - self_pitch_rate)
 
-relative_yaw_sp   = leader_r
-                  + FORM_YAW_KP * e_yaw
-                  + FORM_YAW_KD * (leader_r - self_yaw_rate)
+relative_yaw_corr   = FORM_YAW_FF * leader_r
+                    + FORM_YAW_KP * e_yaw
+                    + FORM_YAW_KD * (leader_r - self_yaw_rate)
 
 stick_roll_sp     = FORM_ROLL_COMP * (roll - self_roll)
 stick_pitch_sp    = side_sign * roll * FORM_R2P_GAIN
@@ -135,14 +134,19 @@ stick_pitch_sp    = side_sign * roll * FORM_R2P_GAIN
 stick_yaw_sp      = yaw * FORM_YAW_SYNC
                   - self_yaw_rate * FORM_YAW_COMP
 
-roll_rate_sp      = 0.5 * relative_roll_sp  + 0.5 * stick_roll_sp
-pitch_rate_sp     = 0.5 * relative_pitch_sp + 0.5 * stick_pitch_sp
-yaw_rate_sp       = 0.5 * relative_yaw_sp   + 0.5 * stick_yaw_sp
+roll_rate_sp      = 1.0 * stick_roll_sp  + 0.3  * relative_roll_corr
+pitch_rate_sp     = 1.0 * stick_pitch_sp + 0.15 * relative_pitch_corr
+yaw_rate_sp       = 1.0 * stick_yaw_sp   + 0.3  * relative_yaw_corr
 
 base_thrust   = (throttle + 1) / 2
 outer_boost   = left ? max(yaw, 0) : max(-yaw, 0)
 thrust_x      = base_thrust + outer_boost * FORM_YAW_K
 ```
+
+说明：
+- 当前三轴辅助修正权重是代码内固定常量，未做成参数。
+- 当前实现中 `roll/yaw` 辅助权重为 `0.3`，`pitch` 辅助权重为 `0.15`。
+- `FORM_ROLL_KD / FORM_PITCH_KD / FORM_YAW_KD` 默认值当前均为 `0.0`，也就是默认保留 D 项代码但实际不参与控制。
 
 主机侧还会在固定翼速率控制输出阶段增加一项偏航同步加速：
 
@@ -150,7 +154,7 @@ thrust_x      = base_thrust + outer_boost * FORM_YAW_K
 master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
 ```
 
-其中这项逻辑只在 `FORM_FOLLOWER_EN == 0` 时生效，也就是主机身份下生效；从机身份下不在 `FixedwingRateControl.cpp` 里执行这一步。
+其中这项逻辑只在 `FORM_FOLLOWER_EN == 0` 且 `UAVCAN_PUB_FORM == 1` 时生效，也就是主机身份并实际开启编队广播时生效；从机身份下不在 `FixedwingRateControl.cpp` 里执行这一步。
 
 随后对 `roll / pitch / yaw` 速率设定值进行限幅：
 
@@ -162,11 +166,12 @@ yaw   ∈ [-FORM_YAW_RMAX,  +FORM_YAW_RMAX]
 
 ### 4.2 物理意义
 
-- 主机向右滚时，左右从机会根据主机真实滚转姿态与从机自身滚转姿态的相对误差生成控制量；同时 `FORM_R2P_GAIN` 会让左机抬头、右机低头，形成整体右滚。
+- 主机向右滚时，左右从机会根据主机真实滚转姿态与从机自身滚转姿态的相对误差生成辅助滚转修正；同时 `FORM_R2P_GAIN` 会在遥控器主控支路里让左机抬头、右机低头，形成整体右滚。
 - 主机向左滚时，左右从机相反动作，形成整体左滚。
-- 主机 `p/q/r` 直接作为前馈项，提高从机跟随速度。
-- 主机与从机的姿态差、角速度差分别通过 `KP / KD` 项形成反馈与阻尼。
-- 上一版“遥控器直接控制”部分仍保留，因此当前从机控制不是纯相对姿态控制，而是两套控制按固定 0.5/0.5 权重融合。
+- 主机 `p/q/r` 通过 `FORM_ROLL_FF / FORM_PITCH_FF / FORM_YAW_FF` 显式进入前馈项，提高从机跟随速度。
+- 主机与从机的姿态差、角速度差分别通过 `KP / KD` 项形成反馈与阻尼，其中 `KD` 作用在相对速率误差上。
+- 上一版“遥控器直接控制”部分仍作为主控通道保留；当前从机控制不是纯相对姿态控制，而是“遥控器主控 + 相对姿态辅助修正”的叠加结构。
+- 当前辅助修正支路中，`pitch` 轴权重最小，为 `0.15`；`roll/yaw` 辅助权重为 `0.3`，因此编队修正对俯仰的介入最弱。
 - 主机右偏航时，左右从机方向舵同向右偏，左机作为外侧机增加油门。
 - 主机左偏航时，左右从机方向舵同向左偏，右机作为外侧机增加油门。
 - 主机自身在左右偏航时也会按 `0.5 * abs(manual.yaw) * FORM_YAW_K` 同步增加油门，用于三机整体偏航阶段的共同推力补偿。
@@ -195,7 +200,7 @@ yaw   ∈ [-FORM_YAW_RMAX,  +FORM_YAW_RMAX]
 初始化时：
 - 查找 `FORM_FOLLOWER_EN`、`FORM_POSITION`、`FORM_R2P_GAIN`、`FORM_YAW_K`
 - 查找相对姿态参数 `FORM_ROLL_OFS / FORM_PITCH_OFS / FORM_YAW_OFS`
-- 查找反馈阻尼参数 `FORM_ROLL_KP / KD`、`FORM_PITCH_KP / KD`、`FORM_YAW_KP / KD`
+- 查找前馈/反馈阻尼参数 `FORM_ROLL_FF / KP / KD`、`FORM_PITCH_FF / KP / KD`、`FORM_YAW_FF / KP / KD`
 - 查找限幅参数 `FORM_ROLL_RMAX / FORM_PTCH_RMAX / FORM_YAW_RMAX`
 - 注册 `ControlInput` 订阅回调
 
@@ -205,11 +210,11 @@ yaw   ∈ [-FORM_YAW_RMAX,  +FORM_YAW_RMAX]
 3. 检查 `flags` 里的 `FLAG_VALID`
 4. 检查 `FORM_POSITION` 是否为左机或右机
 5. 读取从机自身 `vehicle_attitude`、`vehicle_angular_velocity` 和 `vehicle_status`
-6. 计算本机 `self_roll/self_pitch/self_yaw` 与 `self_p/self_q/self_r`
+6. 计算本机 `self_roll/self_pitch/self_yaw` 与 `self_roll_rate/self_pitch_rate/self_yaw_rate`
 7. 计算 `side_sign` 与偏航外侧机油门增量
 8. 发布 `offboard_control_mode`，其中 `body_rate=true`
 9. 如果当前不是 Offboard，则直接退出这次回调，不发布 `vehicle_rates_setpoint`
-10. 如果当前已经是 Offboard，则继续按“相对姿态控制 + 上一版遥控器直接控制”融合逻辑生成 `vehicle_rates_setpoint`
+10. 如果当前已经是 Offboard，则继续按“遥控器主控 + 相对姿态辅助修正”逻辑生成 `vehicle_rates_setpoint`
 11. 由固定翼速率控制器继续完成执行
 
 ### 5.3 下游控制链
@@ -246,15 +251,18 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `UAVCAN_SUB_FORM` | 接收器使能，设为 `1` |
 | `FORM_FOLLOWER_EN` | 从机内部处理开关，设为 `1` |
 | `FORM_POSITION` | 左机设 `1`，右机设 `2` |
-| `FORM_R2P_GAIN` | 滚转误差到俯仰通道的耦合增益 |
+| `FORM_R2P_GAIN` | 遥控器滚转输入到俯仰通道的耦合增益 |
 | `FORM_YAW_K` | 偏航时外侧从机油门增益 |
 | `FORM_ROLL_OFS` | 相对滚转偏角 |
 | `FORM_PITCH_OFS` | 相对俯仰偏角幅值，左右机内部自动取反 |
 | `FORM_YAW_OFS` | 相对偏航偏角 |
+| `FORM_ROLL_FF` | 滚转 leader 角速度显式前馈增益 |
 | `FORM_ROLL_KP` | 滚转相对姿态反馈比例增益 |
 | `FORM_ROLL_KD` | 滚转相对速率阻尼增益 |
+| `FORM_PITCH_FF` | 俯仰 leader 角速度显式前馈增益 |
 | `FORM_PITCH_KP` | 俯仰相对姿态反馈比例增益 |
 | `FORM_PITCH_KD` | 俯仰相对速率阻尼增益 |
+| `FORM_YAW_FF` | 偏航 leader 角速度显式前馈增益 |
 | `FORM_YAW_KP` | 偏航相对姿态反馈比例增益 |
 | `FORM_YAW_KD` | 偏航相对速率阻尼增益 |
 | `FORM_ROLL_RMAX` | 从机滚转角速度限幅 |
@@ -298,15 +306,18 @@ param set FORM_FOLLOWER_EN 1
 param set FORM_POSITION 1
 param set FORM_R2P_GAIN 2.0
 param set FORM_YAW_K 0.3
+param set FORM_ROLL_FF 0.5
+param set FORM_PITCH_FF 0.5
+param set FORM_YAW_FF 0.5
 param set FORM_ROLL_OFS 0.0
 param set FORM_PITCH_OFS 0.0
 param set FORM_YAW_OFS 0.0
 param set FORM_ROLL_KP 2.0
-param set FORM_ROLL_KD 0.3
+param set FORM_ROLL_KD 0.0
 param set FORM_PITCH_KP 2.0
-param set FORM_PITCH_KD 0.3
+param set FORM_PITCH_KD 0.0
 param set FORM_YAW_KP 2.0
-param set FORM_YAW_KD 0.3
+param set FORM_YAW_KD 0.0
 param set FORM_ROLL_RMAX 1.22
 param set FORM_PTCH_RMAX 1.05
 param set FORM_YAW_RMAX 0.87
@@ -325,15 +336,18 @@ param set FORM_FOLLOWER_EN 1
 param set FORM_POSITION 2
 param set FORM_R2P_GAIN 2.0
 param set FORM_YAW_K 0.3
+param set FORM_ROLL_FF 0.5
+param set FORM_PITCH_FF 0.5
+param set FORM_YAW_FF 0.5
 param set FORM_ROLL_OFS 0.0
 param set FORM_PITCH_OFS 0.0
 param set FORM_YAW_OFS 0.0
 param set FORM_ROLL_KP 2.0
-param set FORM_ROLL_KD 0.3
+param set FORM_ROLL_KD 0.0
 param set FORM_PITCH_KP 2.0
-param set FORM_PITCH_KD 0.3
+param set FORM_PITCH_KD 0.0
 param set FORM_YAW_KP 2.0
-param set FORM_YAW_KD 0.3
+param set FORM_YAW_KD 0.0
 param set FORM_ROLL_RMAX 1.22
 param set FORM_PTCH_RMAX 1.05
 param set FORM_YAW_RMAX 0.87

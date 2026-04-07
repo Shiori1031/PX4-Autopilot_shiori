@@ -626,6 +626,22 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_OFS, 0.0f);
 PARAM_DEFINE_FLOAT(FORM_YAW_OFS, 0.0f);
 
 /**
+ * Relative roll rate feedforward gain
+ *
+ * Explicit leader roll-rate feedforward gain for follower tracking.
+ * When combined with FORM_ROLL_KD, leader p enters both the feedforward
+ * path and the relative rate-error damping path.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_FF, 0.5f);
+
+/**
  * Relative roll attitude proportional gain
  *
  * @unit 1/s
@@ -647,7 +663,23 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_KP, 2.0f);
  * @increment 0.1
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_ROLL_KD, 0.3f);
+PARAM_DEFINE_FLOAT(FORM_ROLL_KD, 0.0f);
+
+/**
+ * Relative pitch rate feedforward gain
+ *
+ * Explicit leader pitch-rate feedforward gain for follower tracking.
+ * When combined with FORM_PITCH_KD, leader q enters both the feedforward
+ * path and the relative rate-error damping path.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PITCH_FF, 0.5f);
 
 /**
  * Relative pitch attitude proportional gain
@@ -671,7 +703,23 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_KP, 2.0f);
  * @increment 0.1
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_PITCH_KD, 0.3f);
+PARAM_DEFINE_FLOAT(FORM_PITCH_KD, 0.0f);
+
+/**
+ * Relative yaw rate feedforward gain
+ *
+ * Explicit leader yaw-rate feedforward gain for follower tracking.
+ * When combined with FORM_YAW_KD, leader r enters both the feedforward
+ * path and the relative rate-error damping path.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_FF, 0.5f);
 
 /**
  * Relative yaw attitude proportional gain
@@ -695,7 +743,7 @@ PARAM_DEFINE_FLOAT(FORM_YAW_KP, 2.0f);
  * @increment 0.1
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_YAW_KD, 0.3f);
+PARAM_DEFINE_FLOAT(FORM_YAW_KD, 0.0f);
 
 /**
  * Maximum follower roll rate setpoint
