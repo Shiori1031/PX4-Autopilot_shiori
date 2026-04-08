@@ -41,9 +41,9 @@
 #include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/vehicle_rates_setpoint.h>
 #include <uORB/topics/offboard_control_mode.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_status.h>
 #include <parameters/param.h>
@@ -54,7 +54,7 @@
  *
  * 接收主机发送的 throttle/yaw/roll/pitch/flags 自定义 DroneCAN 消息，
  * 按本机 FORM_POSITION 在从机本地完成编队控制解算，并直接发布到
- * vehicle_rates_setpoint 和 offboard_control_mode。
+ * vehicle_attitude_setpoint 和 offboard_control_mode。
  */
 class FormationRatesBridge : public UavcanSensorBridgeBase
 {
@@ -78,7 +78,7 @@ private:
 
 	uavcan::Subscriber<dronecan::formation::ControlInput, FormationRatesCbBinder> _sub_formation_rates;
 
-	uORB::Publication<vehicle_rates_setpoint_s> _vehicle_rates_setpoint_pub{ORB_ID(vehicle_rates_setpoint)};
+	uORB::Publication<vehicle_attitude_setpoint_s> _vehicle_attitude_setpoint_pub{ORB_ID(vehicle_attitude_setpoint)};
 	uORB::Publication<offboard_control_mode_s> _offboard_control_mode_pub{ORB_ID(offboard_control_mode)};
 	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
@@ -97,6 +97,8 @@ private:
 	param_t _param_roll_rel_offset_h;
 	param_t _param_pitch_rel_offset_h;
 	param_t _param_yaw_rel_offset_h;
+	param_t _param_roll_angle_max_h;
+	param_t _param_pitch_angle_max_h;
 	param_t _param_roll_ff_h;
 	param_t _param_roll_kp_h;
 	param_t _param_roll_kd_h;
@@ -122,6 +124,8 @@ private:
 	float _roll_rel_offset{0.0f};
 	float _pitch_rel_offset{0.0f};
 	float _yaw_rel_offset{0.0f};
+	float _roll_angle_max{0.52f};
+	float _pitch_angle_max{0.35f};
 	float _roll_ff{0.5f};
 	float _roll_kp{2.0f};
 	float _roll_kd{0.0f};

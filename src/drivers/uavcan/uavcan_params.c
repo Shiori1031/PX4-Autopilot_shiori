@@ -626,11 +626,38 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_OFS, 0.0f);
 PARAM_DEFINE_FLOAT(FORM_YAW_OFS, 0.0f);
 
 /**
- * Relative roll rate feedforward gain
+ * Maximum follower roll attitude setpoint magnitude
  *
- * Explicit leader roll-rate feedforward gain for follower tracking.
- * When combined with FORM_ROLL_KD, leader p enters both the feedforward
- * path and the relative rate-error damping path.
+ * Roll stick command is scaled to this maximum absolute attitude.
+ *
+ * @unit rad
+ * @min 0.1
+ * @max 1.57
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 0.52f);
+
+/**
+ * Maximum follower pitch attitude setpoint magnitude
+ *
+ * Pitch stick command is scaled to this maximum absolute attitude.
+ *
+ * @unit rad
+ * @min 0.1
+ * @max 1.57
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
+
+/**
+ * Relative roll attitude feedforward gain
+ *
+ * Feedforward gain applied to the leader roll attitude in the
+ * follower's auxiliary attitude-correction branch.
  *
  * @unit norm
  * @min 0.0
@@ -644,7 +671,7 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_FF, 0.5f);
 /**
  * Relative roll attitude proportional gain
  *
- * @unit 1/s
+ * @unit norm
  * @min 0.0
  * @max 10.0
  * @decimal 2
@@ -654,7 +681,10 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_FF, 0.5f);
 PARAM_DEFINE_FLOAT(FORM_ROLL_KP, 2.0f);
 
 /**
- * Relative roll rate damping gain
+ * Relative roll rate-difference damping gain
+ *
+ * Scales the roll-rate difference term before it is converted into an
+ * auxiliary attitude correction.
  *
  * @unit norm
  * @min 0.0
@@ -666,11 +696,10 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_KP, 2.0f);
 PARAM_DEFINE_FLOAT(FORM_ROLL_KD, 0.0f);
 
 /**
- * Relative pitch rate feedforward gain
+ * Relative pitch attitude feedforward gain
  *
- * Explicit leader pitch-rate feedforward gain for follower tracking.
- * When combined with FORM_PITCH_KD, leader q enters both the feedforward
- * path and the relative rate-error damping path.
+ * Feedforward gain applied to the leader pitch attitude in the
+ * follower's auxiliary attitude-correction branch.
  *
  * @unit norm
  * @min 0.0
@@ -684,7 +713,7 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_FF, 0.5f);
 /**
  * Relative pitch attitude proportional gain
  *
- * @unit 1/s
+ * @unit norm
  * @min 0.0
  * @max 10.0
  * @decimal 2
@@ -694,7 +723,10 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_FF, 0.5f);
 PARAM_DEFINE_FLOAT(FORM_PITCH_KP, 2.0f);
 
 /**
- * Relative pitch rate damping gain
+ * Relative pitch rate-difference damping gain
+ *
+ * Scales the pitch-rate difference term before it is converted into an
+ * auxiliary attitude correction.
  *
  * @unit norm
  * @min 0.0
@@ -706,11 +738,10 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_KP, 2.0f);
 PARAM_DEFINE_FLOAT(FORM_PITCH_KD, 0.0f);
 
 /**
- * Relative yaw rate feedforward gain
+ * Reserved yaw auxiliary feedforward gain
  *
- * Explicit leader yaw-rate feedforward gain for follower tracking.
- * When combined with FORM_YAW_KD, leader r enters both the feedforward
- * path and the relative rate-error damping path.
+ * Reserved for future dedicated yaw auxiliary control tuning.
+ * The current attitude-injection implementation uses simple yaw following.
  *
  * @unit norm
  * @min 0.0
@@ -722,9 +753,11 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_KD, 0.0f);
 PARAM_DEFINE_FLOAT(FORM_YAW_FF, 0.5f);
 
 /**
- * Relative yaw attitude proportional gain
+ * Reserved yaw auxiliary proportional gain
  *
- * @unit 1/s
+ * Reserved for future dedicated yaw auxiliary control tuning.
+ *
+ * @unit norm
  * @min 0.0
  * @max 10.0
  * @decimal 2
@@ -734,7 +767,9 @@ PARAM_DEFINE_FLOAT(FORM_YAW_FF, 0.5f);
 PARAM_DEFINE_FLOAT(FORM_YAW_KP, 2.0f);
 
 /**
- * Relative yaw rate damping gain
+ * Reserved yaw auxiliary damping gain
+ *
+ * Reserved for future dedicated yaw auxiliary control tuning.
  *
  * @unit norm
  * @min 0.0

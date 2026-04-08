@@ -42,10 +42,11 @@ namespace
 {
 constexpr int32_t FORMATION_POSITION_LEFT = 1;
 constexpr int32_t FORMATION_POSITION_RIGHT = 2;
+constexpr float RATE_ERROR_TO_ATTITUDE_SCALE = 0.2f;
 }
 
 FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublisher *node_info_publisher) :
-	UavcanSensorBridgeBase("uavcan_formation_rates", ORB_ID(vehicle_rates_setpoint), node_info_publisher, 8),
+	UavcanSensorBridgeBase("uavcan_formation_rates", ORB_ID(vehicle_attitude_setpoint), node_info_publisher, 8),
 	_sub_formation_rates(node)
 {
 	// 查找参数句柄
@@ -56,6 +57,8 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	_param_roll_rel_offset_h = param_find("FORM_ROLL_OFS");
 	_param_pitch_rel_offset_h = param_find("FORM_PITCH_OFS");
 	_param_yaw_rel_offset_h = param_find("FORM_YAW_OFS");
+	_param_roll_angle_max_h = param_find("FORM_ROLL_AMAX");
+	_param_pitch_angle_max_h = param_find("FORM_PTCH_AMAX");
 	_param_roll_ff_h = param_find("FORM_ROLL_FF");
 	_param_roll_kp_h = param_find("FORM_ROLL_KP");
 	_param_roll_kd_h = param_find("FORM_ROLL_KD");
@@ -104,6 +107,14 @@ int FormationRatesBridge::init()
 
 	if (_param_yaw_rel_offset_h != PARAM_INVALID) {
 		param_get(_param_yaw_rel_offset_h, &_yaw_rel_offset);
+	}
+
+	if (_param_roll_angle_max_h != PARAM_INVALID) {
+		param_get(_param_roll_angle_max_h, &_roll_angle_max);
+	}
+
+	if (_param_pitch_angle_max_h != PARAM_INVALID) {
+		param_get(_param_pitch_angle_max_h, &_pitch_angle_max);
 	}
 
 	if (_param_roll_ff_h != PARAM_INVALID) {
@@ -219,6 +230,14 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 			param_get(_param_yaw_rel_offset_h, &_yaw_rel_offset);
 		}
 
+		if (_param_roll_angle_max_h != PARAM_INVALID) {
+			param_get(_param_roll_angle_max_h, &_roll_angle_max);
+		}
+
+		if (_param_pitch_angle_max_h != PARAM_INVALID) {
+			param_get(_param_pitch_angle_max_h, &_pitch_angle_max);
+		}
+
 		if (_param_roll_ff_h != PARAM_INVALID) {
 			param_get(_param_roll_ff_h, &_roll_ff);
 		}
@@ -318,10 +337,8 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	matrix::Eulerf euler(q);
 	const float self_roll = euler.phi();
 	const float self_pitch = euler.theta();
-	const float self_yaw = euler.psi();
 	const float self_roll_rate = angular_velocity.xyz[0];
 	const float self_pitch_rate = angular_velocity.xyz[1];
-	const float self_yaw_rate = angular_velocity.xyz[2];
 	// 判断左右机，计算油门及偏航增量; 左 +1, 右 -1
 	const float side_sign = (_formation_position == FORMATION_POSITION_LEFT) ? 1.0f : -1.0f;
 	const float base_thrust = math::constrain((static_cast<float>(msg.throttle) + 1.0f) * 0.5f, 0.0f, 1.0f);
@@ -343,8 +360,8 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	offboard_mode.position = false;
 	offboard_mode.velocity = false;
 	offboard_mode.acceleration = false;
-	offboard_mode.attitude = false;
-	offboard_mode.body_rate = true;
+	offboard_mode.attitude = true;
+	offboard_mode.body_rate = false;
 	_offboard_control_mode_pub.publish(offboard_mode);
 
 	// 如果当前不是 Offboard 直接退出这次回调
@@ -352,9 +369,9 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 		return;
 	}
 
-// 从机主要控制逻辑: 相对姿态PID控制 + 遥控器控制 加权融合
-	vehicle_rates_setpoint_s rates_sp{};
-	rates_sp.timestamp = _last_command_time;
+// 从机主要控制逻辑: 遥控器姿态主控 + 相对姿态辅助修正
+	vehicle_attitude_setpoint_s att_sp{};
+	att_sp.timestamp = _last_command_time;
 
 	// 主机状态（使用发送端广播的实际姿态角和 p/q/r）
 	const float leader_roll = static_cast<float>(msg.att_roll);
@@ -362,7 +379,6 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	const float leader_yaw = static_cast<float>(msg.att_yaw);
 	const float leader_p = static_cast<float>(msg.p);
 	const float leader_q = static_cast<float>(msg.q);
-	const float leader_r = static_cast<float>(msg.r);
 
 	// 期望相对姿态（安装偏角 / 编队偏角）
 	// 初始安装角度，直接设置为0
@@ -373,52 +389,45 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	// 相对误差
 	const float e_roll = (leader_roll + roll_rel_des) - self_roll;
 	const float e_pitch = (leader_pitch + pitch_rel_des) - self_pitch;
-	const float e_yaw = matrix::wrap_pi((leader_yaw + yaw_rel_des) - self_yaw);
 
-// 1. 相对姿态 + 主机 p/q/r 显式前馈 + 相对速率误差阻尼
-	// 滚转：显式 leader p 前馈 + 相对姿态反馈(P x roll误差) + 相对速率误差阻尼(D x rate误差)
-	const float relative_roll_corr = _roll_ff * leader_p + _roll_kp * e_roll + _roll_kd * (leader_p - self_roll_rate);
+// 1. 相对姿态辅助修正：leader 姿态前馈 + 相对姿态误差反馈 + 速率差阻尼（经固定尺度转换为姿态修正）
+	const float relative_roll_corr = _roll_ff * (leader_roll + roll_rel_des)
+				       + _roll_kp * e_roll
+				       + _roll_kd * (leader_p - self_roll_rate) * RATE_ERROR_TO_ATTITUDE_SCALE;
 
-	// 俯仰：显式 leader q 前馈 + 相对姿态反馈(P x pitch误差) + 相对速率误差阻尼(D x rate误差)
-	// 从机的俯仰影响整体滚转，side_sign 区分左右机进行反向俯仰
-	const float relative_pitch_corr = _pitch_ff * leader_q + _pitch_kp * e_pitch + _pitch_kd * (leader_q - self_pitch_rate);
+	const float relative_pitch_corr = _pitch_ff * (leader_pitch + pitch_rel_des)
+					+ _pitch_kp * e_pitch
+					+ _pitch_kd * (leader_q - self_pitch_rate) * RATE_ERROR_TO_ATTITUDE_SCALE;
 
-	// 偏航：显式 leader r 前馈 + 相对姿态反馈(P x yaw误差) + 相对速率误差阻尼(D x rate误差)
-	// 偏航方向舵都同向偏转，(rates_sp.yaw: 机体系 z 轴偏航角速度设定值)
-	const float relative_yaw_corr = _yaw_ff * leader_r + _yaw_kp * e_yaw + _yaw_kd * (leader_r - self_yaw_rate);
+// 2. 遥控器姿态主控逻辑
+	const float stick_roll_target = static_cast<float>(msg.roll) * _roll_angle_max;// [-1,1] * 30° -> [-30°, 30°]
+	const float stick_pitch_target = side_sign * static_cast<float>(msg.roll) * _roll_to_pitch_gain * _pitch_angle_max
+				       + static_cast<float>(msg.pitch) * _pitch_sync * _pitch_angle_max;
 
-// 2. 遥控器直接控制逻辑
-	// 滚转：系数 x (遥控输入 - 自身滚转); default MAX: ±1.22 rad/s
-	const float stick_roll_sp = _roll_comp_gain * (static_cast<float>(msg.roll) - self_roll);
+	const float stick_roll_att = self_roll + _roll_comp_gain * (stick_roll_target - self_roll);
+	const float stick_pitch_att = self_pitch + _pitch_comp_gain * (stick_pitch_target - self_pitch);
 
-	// 俯仰：左右机系数(±) x 滚转映射 + 俯仰同步 - 自身 pitch 补偿; default MAX: ±1.05 rad/s
-	const float stick_pitch_sp = side_sign * static_cast<float>(msg.roll) * _roll_to_pitch_gain
-				 + static_cast<float>(msg.pitch) * _pitch_sync - self_pitch * _pitch_comp_gain;
-
-	// 偏航：主机偏航同步系数 x 遥控输入 - 自身 yaw_rate 阻尼补偿; default MAX: ±0.87 rad/s
-	const float stick_yaw_sp = static_cast<float>(msg.yaw) * _yaw_sync - self_yaw_rate * _yaw_comp_gain;
-
-// 加权融合：目前依旧以遥控器输入为主，相对姿态控制太慢，当作辅助通道；pitch：最敏感设0.15
+// 3. 加权融合：遥控器主控，编队相对姿态作为辅助修正；yaw 暂时简单跟随 leader 姿态
 	constexpr float stick_ctrl_weight = 1.0f;
-	constexpr float relative_ctrl_roll_weight = 0.3f;
-	constexpr float relative_ctrl_pitch_weight = 0.15f;
-	constexpr float relative_ctrl_yaw_weight = 0.3f;
-	rates_sp.roll = stick_ctrl_weight * stick_roll_sp + relative_ctrl_roll_weight * relative_roll_corr;
-	rates_sp.pitch = stick_ctrl_weight * stick_pitch_sp + relative_ctrl_pitch_weight * relative_pitch_corr;
-	rates_sp.yaw = stick_ctrl_weight * stick_yaw_sp + relative_ctrl_yaw_weight * relative_yaw_corr;
+	constexpr float relative_ctrl_roll_weight = 0.2f;
+	constexpr float relative_ctrl_pitch_weight = 0.1f;
+	const float roll_sp = math::constrain(stick_ctrl_weight * stick_roll_att + relative_ctrl_roll_weight * relative_roll_corr,
+					 -_roll_angle_max, _roll_angle_max);
+	const float pitch_sp = math::constrain(stick_ctrl_weight * stick_pitch_att + relative_ctrl_pitch_weight * relative_pitch_corr,
+					  -_pitch_angle_max, _pitch_angle_max);
+	const float yaw_sp = matrix::wrap_pi(leader_yaw + yaw_rel_des);
 
-	// 限幅：参考 PX4 fixed-wing 原生默认 rate setpoint 上限
-	rates_sp.roll = math::constrain(rates_sp.roll, -_roll_rate_max, _roll_rate_max);
-	rates_sp.pitch = math::constrain(rates_sp.pitch, -_pitch_rate_max, _pitch_rate_max);
-	rates_sp.yaw = math::constrain(rates_sp.yaw, -_yaw_rate_max, _yaw_rate_max);
+	// 欧拉角转四元数
+	matrix::Quatf q_d(matrix::Eulerf(roll_sp, pitch_sp, yaw_sp));
+	q_d.copyTo(att_sp.q_d);
+	att_sp.yaw_sp_move_rate = 0.0f;// 不另外附加偏航转速命令（rad/s）
 
 	// 推力：基础油门 + 外侧机增量; default MAX: [0, 1]
 	// yaw_for_boost 已经判断左右机并取正值或 0; _yaw_throttle_gain 固定增益
-	rates_sp.thrust_body[0] = math::constrain(base_thrust + yaw_for_boost * _yaw_throttle_gain, 0.0f, 1.0f);
-	rates_sp.thrust_body[1] = 0.0f;
-	rates_sp.thrust_body[2] = 0.0f;
-	rates_sp.reset_integral = (msg.flags & dronecan::formation::ControlInput::FLAG_RESET_INTEGRAL) != 0;
-	_vehicle_rates_setpoint_pub.publish(rates_sp);
+	att_sp.thrust_body[0] = math::constrain(base_thrust + yaw_for_boost * _yaw_throttle_gain, 0.0f, 1.0f);
+	att_sp.thrust_body[1] = 0.0f;
+	att_sp.thrust_body[2] = 0.0f;
+	_vehicle_attitude_setpoint_pub.publish(att_sp);
 }
 
 int FormationRatesBridge::init_driver(uavcan_bridge::Channel *channel)
