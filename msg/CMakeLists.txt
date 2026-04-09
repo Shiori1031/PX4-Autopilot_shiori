@@ -90,6 +90,7 @@ set(msg_files
 	FailsafeFlags.msg
 	FailureDetectorStatus.msg
 	FlightPhaseEstimation.msg
+	FormationMotorPwm.msg
 	FollowTarget.msg
 	FollowTargetEstimator.msg
 	FollowTargetStatus.msg

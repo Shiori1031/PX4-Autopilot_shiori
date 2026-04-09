@@ -268,6 +268,18 @@ PARAM_DEFINE_INT32(UAVCAN_PUB_CTRL, 0);
 PARAM_DEFINE_INT32(UAVCAN_PUB_FORM, 0);
 
 /**
+ * publish motor rpm + pwm
+ *
+ * Enable UAVCAN motor RPM + PWM publication
+ *  dronecan::formation::MotorPwmStatus
+ *
+ * @boolean
+ * @reboot_required true
+ * @group UAVCAN
+ */
+PARAM_DEFINE_INT32(UAVCAN_PUB_MRPM, 0);
+
+/**
  * publish RTCM stream
  *
  * Enable UAVCAN RTCM stream publication
@@ -486,6 +498,18 @@ PARAM_DEFINE_INT32(UAVCAN_SUB_CTRL, 0);
 PARAM_DEFINE_INT32(UAVCAN_SUB_FORM, 0);
 
 /**
+ * subscription motor rpm + pwm
+ *
+ * Enable UAVCAN motor RPM + PWM subscription.
+ *  dronecan::formation::MotorPwmStatus
+ *
+ * @boolean
+ * @reboot_required true
+ * @group UAVCAN
+ */
+PARAM_DEFINE_INT32(UAVCAN_SUB_MRPM, 0);
+
+/**
  * subscription range finder
  *
  * Enable UAVCAN range finder subscription.
@@ -520,6 +544,18 @@ PARAM_DEFINE_INT32(UAVCAN_SUB_BTN, 0);
  * @group UAVCAN
  */
 PARAM_DEFINE_INT32(UAVCAN_SUB_MBD, 0);
+
+/**
+ * PWM channel forwarded in MotorPwmStatus
+ *
+ * 1-based actuator_outputs channel index to be forwarded together with the
+ * first four motor RPM values.
+ *
+ * @min 1
+ * @max 16
+ * @group UAVCAN
+ */
+PARAM_DEFINE_INT32(UAVCAN_MPWM_CH, 5);
 
 /**
  * Formation follower enable

@@ -22,6 +22,10 @@ if DRIVERS_UAVCAN
         bool "Include formation rates sender"
         default n
 
+    config UAVCAN_FORMATION_MOTOR_PWM_SENDER
+        bool "Include formation motor + PWM sender"
+        default n
+
     config UAVCAN_BEEP_CONTROLLER
         bool "Include beep controller"
         default y
@@ -56,6 +60,10 @@ if DRIVERS_UAVCAN
 
     config UAVCAN_SENSOR_FORMATION_RATES
         bool "Subscribe to Formation Rates:             dronecan::formation::ControlInput"
+        default n
+
+    config UAVCAN_SENSOR_FORMATION_MOTOR_PWM
+        bool "Subscribe to Formation Motor PWM:         dronecan::formation::MotorPwmStatus"
         default n
 
     config UAVCAN_SENSOR_AIRSPEED

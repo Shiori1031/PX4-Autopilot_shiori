@@ -71,6 +71,10 @@
 #include "formation_rates_sender.hpp"
 #endif
 
+#if defined(CONFIG_UAVCAN_FORMATION_MOTOR_PWM_SENDER)
+#include "formation_motor_pwm_sender.hpp"
+#endif
+
 #if defined(CONFIG_UAVCAN_BEEP_CONTROLLER)
 #include "beep.hpp"
 #endif
@@ -275,6 +279,9 @@ private:
 #endif
 #if defined(CONFIG_UAVCAN_FORMATION_RATES_SENDER)
 	FormationRatesSender		_formation_rates_sender;
+#endif
+#if defined(CONFIG_UAVCAN_FORMATION_MOTOR_PWM_SENDER)
+	FormationMotorPwmSender		_formation_motor_pwm_sender;
 #endif
 #if defined(CONFIG_UAVCAN_BEEP_CONTROLLER)
 	UavcanBeepController		_beep_controller;

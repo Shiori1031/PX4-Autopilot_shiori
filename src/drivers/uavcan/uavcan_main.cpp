@@ -89,6 +89,9 @@ UavcanNode::UavcanNode(uavcan::ICanDriver &can_driver, uavcan::ISystemClock &sys
 #if defined(CONFIG_UAVCAN_FORMATION_RATES_SENDER)
 	_formation_rates_sender(_node),
 #endif
+#if defined(CONFIG_UAVCAN_FORMATION_MOTOR_PWM_SENDER)
+	_formation_motor_pwm_sender(_node),
+#endif
 #if defined(CONFIG_UAVCAN_BEEP_CONTROLLER)
 	_beep_controller(_node),
 #endif
@@ -559,6 +562,21 @@ UavcanNode::init(uavcan::NodeID node_id, UAVCAN_DRIVER::BusEvent &bus_events)
 
 	if (uavcan_pub_form == 1) {
 		ret = _formation_rates_sender.init();
+
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+#endif
+
+#if defined(CONFIG_UAVCAN_FORMATION_MOTOR_PWM_SENDER)
+	// UAVCAN_PUB_MRPM
+	int32_t uavcan_pub_mrpm = 0;
+	param_get(param_find("UAVCAN_PUB_MRPM"), &uavcan_pub_mrpm);
+
+	if (uavcan_pub_mrpm == 1) {
+		ret = _formation_motor_pwm_sender.init();
 
 		if (ret < 0) {
 			return ret;
