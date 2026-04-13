@@ -90,6 +90,7 @@ int FormationMotorPwmBridge::init_driver(uavcan_bridge::Channel *channel)
  *
  * 这个桥接模块已经把 CAN 消息转成了本地 uORB 话题 `formation_motor_pwm`，
  * 所以其他模块只需要像普通 uORB 一样订阅即可。
+ * listener formation_motor_pwm -n 10
  *
  * 最少需要 include:
  *   #include <uORB/Subscription.hpp>

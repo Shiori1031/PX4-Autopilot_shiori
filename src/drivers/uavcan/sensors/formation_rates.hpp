@@ -99,6 +99,8 @@ private:
 	param_t _param_yaw_rel_offset_h;
 	param_t _param_roll_angle_max_h;
 	param_t _param_pitch_angle_max_h;
+	param_t _param_roll_level_threshold_h;
+	param_t _param_roll_level_gain_h;
 	param_t _param_roll_ff_h;
 	param_t _param_roll_kp_h;
 	param_t _param_roll_kd_h;
@@ -126,6 +128,8 @@ private:
 	float _yaw_rel_offset{0.0f};
 	float _roll_angle_max{0.52f};
 	float _pitch_angle_max{0.35f};
+	float _roll_level_threshold{0.2618f};
+	float _roll_level_gain{1.0f};
 	float _roll_ff{0.5f};
 	float _roll_kp{2.0f};
 	float _roll_kd{0.0f};

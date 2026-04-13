@@ -133,7 +133,12 @@ stick_roll_att  = self_roll
 stick_pitch_att = self_pitch
                 + FORM_PITCH_COMP * (stick_pitch_target - self_pitch)
 
-roll_sp  = constrain(1.0 * stick_roll_att  + 0.2 * relative_roll_corr,
+self_roll_level_corr = 0
+if abs(self_roll) > FORM_RLEV_THR:
+    self_roll_level_corr = -sign(self_roll) * FORM_RLEV_K * (abs(self_roll) - FORM_RLEV_THR)
+
+roll_sp  = constrain(1.0 * stick_roll_att  + 0.2 * relative_roll_corr
+                     + self_roll_level_corr,
                      -FORM_ROLL_AMAX, FORM_ROLL_AMAX)
 pitch_sp = constrain(1.0 * stick_pitch_att + 0.1 * relative_pitch_corr,
                      -FORM_PTCH_AMAX, FORM_PTCH_AMAX)
@@ -149,6 +154,7 @@ thrust_x      = base_thrust + outer_boost * FORM_YAW_K
 说明：
 - 当前 `roll/pitch` 辅助修正权重是代码内固定常量，未做成参数。
 - 当前实现中 `roll` 辅助权重为 `0.2`，`pitch` 辅助权重为 `0.1`。
+- 当从机自身滚转绝对值超过 `FORM_RLEV_THR` 时，会额外叠加一个反向回正姿态修正；随着滚转角回到阈值附近，该修正会自然衰减到 `0`。
 - `FORM_ROLL_KD / FORM_PITCH_KD` 作用在相对角速度误差上，并通过固定比例 `0.2` 转成姿态修正量；默认值当前均为 `0.0`。
 - `FORM_YAW_FF / FORM_YAW_KP / FORM_YAW_KD` 在当前姿态注入版本中暂未参与实际偏航修正，保留给后续专门的 yaw 控制逻辑。
 - 当前 `FORM_ROLL_RMAX / FORM_PTCH_RMAX / FORM_YAW_RMAX` 保留在参数表中，但在姿态注入版本里不参与实际限幅。
@@ -258,6 +264,8 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `FORM_YAW_OFS` | 相对偏航偏角 |
 | `FORM_ROLL_AMAX` | 遥控器主控支路的最大滚转姿态角 |
 | `FORM_PTCH_AMAX` | 遥控器主控支路的最大俯仰姿态角 |
+| `FORM_RLEV_THR` | 从机自身滚转触发自动回正的阈值 |
+| `FORM_RLEV_K` | 从机自身滚转自动回正增益 |
 | `FORM_ROLL_FF` | 滚转 leader 姿态前馈增益 |
 | `FORM_ROLL_KP` | 滚转相对姿态反馈比例增益 |
 | `FORM_ROLL_KD` | 滚转相对速率差阻尼增益 |
@@ -310,6 +318,8 @@ param set FORM_R2P_GAIN 2.0
 param set FORM_YAW_K 0.3
 param set FORM_ROLL_AMAX 0.52
 param set FORM_PTCH_AMAX 0.35
+param set FORM_RLEV_THR 0.2618
+param set FORM_RLEV_K 1.0
 param set FORM_ROLL_FF 0.5
 param set FORM_PITCH_FF 0.5
 param set FORM_ROLL_OFS 0.0
@@ -339,6 +349,8 @@ param set FORM_R2P_GAIN 2.0
 param set FORM_YAW_K 0.3
 param set FORM_ROLL_AMAX 0.52
 param set FORM_PTCH_AMAX 0.35
+param set FORM_RLEV_THR 0.2618
+param set FORM_RLEV_K 1.0
 param set FORM_ROLL_FF 0.5
 param set FORM_PITCH_FF 0.5
 param set FORM_ROLL_OFS 0.0

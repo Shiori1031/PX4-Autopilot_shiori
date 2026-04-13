@@ -690,6 +690,37 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 0.52f);
 PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
 
 /**
+ * Roll self-level threshold
+ *
+ * When the follower's absolute roll angle exceeds this threshold, a
+ * counter-roll correction is gradually added to drive the aircraft back
+ * toward level flight.
+ *
+ * @unit rad
+ * @min 0.0
+ * @max 1.57
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_RLEV_THR, 0.2618f);
+
+/**
+ * Roll self-level gain
+ *
+ * Gain for the counter-roll correction applied when the follower roll
+ * angle exceeds FORM_RLEV_THR.
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 2
+ * @increment 0.05
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_RLEV_K, 1.0f);
+
+/**
  * Relative roll attitude feedforward gain
  *
  * Feedforward gain applied to the leader roll attitude in the
