@@ -604,21 +604,6 @@ PARAM_DEFINE_INT32(FORM_POSITION, 0);
 PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
 
 /**
- * Follower roll compensation gain
- *
- * Follower-side self-stabilization gain for body-rate setpoint:
- * roll_rate_sp = FORM_ROLL_COMP * (roll_cmd_tx - self_roll).
- *
- * @unit norm
- * @min 0.5
- * @max 5.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_ROLL_COMP, 2.0f);
-
-/**
  * Relative roll offset for follower tracking
  *
  * Desired roll offset relative to the leader.
@@ -914,21 +899,6 @@ PARAM_DEFINE_FLOAT(FORM_YAW_K, 0.3f);
 PARAM_DEFINE_FLOAT(FORM_PITCH_SYNC, 0.1f);
 
 /**
- * Pitch self-stabilization coefficient
- *
- * Additional pitch compensation based on the follower's own pitch angle.
- * Larger values increase pitch disturbance rejection.
- *
- * @unit norm
- * @min 0.0
- * @max 5.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PITCH_COMP, 1.0f);
-
-/**
  * Yaw synchronization coefficient
  *
  * How much follower planes should track master yaw input.
@@ -942,18 +912,3 @@ PARAM_DEFINE_FLOAT(FORM_PITCH_COMP, 1.0f);
  * @group Formation Control
  */
 PARAM_DEFINE_FLOAT(FORM_YAW_SYNC, 1.0f);
-
-/**
- * Yaw self-stabilization coefficient
- *
- * Additional damping based on the follower's own yaw rate.
- * Larger values increase yaw disturbance rejection.
- *
- * @unit norm
- * @min 0.0
- * @max 5.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_COMP, 0.3f);

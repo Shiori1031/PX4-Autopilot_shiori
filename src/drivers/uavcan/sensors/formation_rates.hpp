@@ -114,10 +114,7 @@ private:
 	param_t _param_pitch_rate_max_h;
 	param_t _param_yaw_rate_max_h;
 	param_t _param_pitch_sync_h;
-	param_t _param_pitch_comp_gain_h;
 	param_t _param_yaw_sync_h;
-	param_t _param_yaw_comp_gain_h;
-	param_t _param_roll_comp_gain_h;
 
 	int32_t _follower_enable{0};
 	int32_t _formation_position{0};
@@ -143,8 +140,5 @@ private:
 	float _pitch_rate_max{1.05f};
 	float _yaw_rate_max{0.87f};
 	float _pitch_sync{1.0f};
-	float _pitch_comp_gain{1.0f};
 	float _yaw_sync{1.0f};
-	float _yaw_comp_gain{0.3f};
-	float _roll_comp_gain{1.0f};
 };

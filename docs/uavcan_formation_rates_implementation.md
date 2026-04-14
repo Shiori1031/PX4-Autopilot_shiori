@@ -127,20 +127,14 @@ stick_roll_target = roll * FORM_ROLL_AMAX
 stick_pitch_target = side_sign * roll * FORM_R2P_GAIN * FORM_PTCH_AMAX
                    + pitch * FORM_PITCH_SYNC * FORM_PTCH_AMAX
 
-stick_roll_att  = self_roll
-                + FORM_ROLL_COMP * (stick_roll_target - self_roll)
-
-stick_pitch_att = self_pitch
-                + FORM_PITCH_COMP * (stick_pitch_target - self_pitch)
-
 self_roll_level_corr = 0
 if abs(self_roll) > FORM_RLEV_THR:
     self_roll_level_corr = -sign(self_roll) * FORM_RLEV_K * (abs(self_roll) - FORM_RLEV_THR)
 
-roll_sp  = constrain(1.0 * stick_roll_att  + 0.2 * relative_roll_corr
+roll_sp  = constrain(1.0 * stick_roll_target + 0.2 * relative_roll_corr
                      + self_roll_level_corr,
                      -FORM_ROLL_AMAX, FORM_ROLL_AMAX)
-pitch_sp = constrain(1.0 * stick_pitch_att + 0.1 * relative_pitch_corr,
+pitch_sp = constrain(1.0 * stick_pitch_target + 0.1 * relative_pitch_corr,
                      -FORM_PTCH_AMAX, FORM_PTCH_AMAX)
 yaw_sp   = wrap_pi(leader_yaw + FORM_YAW_OFS)
 
@@ -272,9 +266,7 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `FORM_PITCH_FF` | 俯仰 leader 姿态前馈增益 |
 | `FORM_PITCH_KP` | 俯仰相对姿态反馈比例增益 |
 | `FORM_PITCH_KD` | 俯仰相对速率差阻尼增益 |
-| `FORM_ROLL_COMP` | 遥控器主控滚转姿态跟随增益 |
 | `FORM_PITCH_SYNC` | 遥控器主控俯仰同步增益 |
-| `FORM_PITCH_COMP` | 遥控器主控俯仰姿态跟随增益 |
 | `COM_OF_LOSS_T` | Offboard 丢失超时，使用 PX4 原生机制 |
 
 ### 6.3 预留叠加参数
@@ -287,7 +279,6 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `FORM_YAW_KP` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
 | `FORM_YAW_KD` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
 | `FORM_YAW_SYNC` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
-| `FORM_YAW_COMP` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
 | `FORM_ROLL_RMAX` | 姿态注入版本中暂未参与实际限幅 |
 | `FORM_PTCH_RMAX` | 姿态注入版本中暂未参与实际限幅 |
 | `FORM_YAW_RMAX` | 姿态注入版本中暂未参与实际限幅 |
@@ -329,9 +320,7 @@ param set FORM_ROLL_KP 2.0
 param set FORM_ROLL_KD 0.0
 param set FORM_PITCH_KP 2.0
 param set FORM_PITCH_KD 0.0
-param set FORM_ROLL_COMP 1.0
 param set FORM_PITCH_SYNC 0.1
-param set FORM_PITCH_COMP 1.0
 param set COM_OF_LOSS_T 1.0
 param save
 reboot
@@ -360,9 +349,7 @@ param set FORM_ROLL_KP 2.0
 param set FORM_ROLL_KD 0.0
 param set FORM_PITCH_KP 2.0
 param set FORM_PITCH_KD 0.0
-param set FORM_ROLL_COMP 1.0
 param set FORM_PITCH_SYNC 0.1
-param set FORM_PITCH_COMP 1.0
 param set COM_OF_LOSS_T 1.0
 param save
 reboot

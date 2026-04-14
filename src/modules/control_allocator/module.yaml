@@ -805,7 +805,7 @@ mixer:
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
             3: # Elevator
-              - { 'hidden': True, 'default': 0.0 } # roll
+              - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0.0  } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 1.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap

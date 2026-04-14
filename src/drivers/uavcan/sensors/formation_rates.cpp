@@ -74,10 +74,7 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	_param_pitch_rate_max_h = param_find("FORM_PTCH_RMAX");
 	_param_yaw_rate_max_h = param_find("FORM_YAW_RMAX");
 	_param_pitch_sync_h = param_find("FORM_PITCH_SYNC");
-	_param_pitch_comp_gain_h = param_find("FORM_PITCH_COMP");
 	_param_yaw_sync_h = param_find("FORM_YAW_SYNC");
-	_param_yaw_comp_gain_h = param_find("FORM_YAW_COMP");
-	_param_roll_comp_gain_h = param_find("FORM_ROLL_COMP");
 }
 
 int FormationRatesBridge::init()
@@ -179,20 +176,8 @@ int FormationRatesBridge::init()
 		param_get(_param_pitch_sync_h, &_pitch_sync);
 	}
 
-	if (_param_pitch_comp_gain_h != PARAM_INVALID) {
-		param_get(_param_pitch_comp_gain_h, &_pitch_comp_gain);
-	}
-
 	if (_param_yaw_sync_h != PARAM_INVALID) {
 		param_get(_param_yaw_sync_h, &_yaw_sync);
-	}
-
-	if (_param_yaw_comp_gain_h != PARAM_INVALID) {
-		param_get(_param_yaw_comp_gain_h, &_yaw_comp_gain);
-	}
-
-	if (_param_roll_comp_gain_h != PARAM_INVALID) {
-		param_get(_param_roll_comp_gain_h, &_roll_comp_gain);
 	}
 	// 启动 UAVCAN 订阅
 	int res = _sub_formation_rates.start(FormationRatesCbBinder(this, &FormationRatesBridge::formation_rates_sub_cb));
@@ -308,20 +293,8 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 			param_get(_param_pitch_sync_h, &_pitch_sync);
 		}
 
-		if (_param_pitch_comp_gain_h != PARAM_INVALID) {
-			param_get(_param_pitch_comp_gain_h, &_pitch_comp_gain);
-		}
-
 		if (_param_yaw_sync_h != PARAM_INVALID) {
 			param_get(_param_yaw_sync_h, &_yaw_sync);
-		}
-
-		if (_param_yaw_comp_gain_h != PARAM_INVALID) {
-			param_get(_param_yaw_comp_gain_h, &_yaw_comp_gain);
-		}
-
-		if (_param_roll_comp_gain_h != PARAM_INVALID) {
-			param_get(_param_roll_comp_gain_h, &_roll_comp_gain);
 		}
 	}
 
@@ -421,9 +394,6 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	const float stick_roll_target = static_cast<float>(msg.roll) * _roll_angle_max;// [-1,1] * 30° -> [-30°, 30°]
 	const float stick_pitch_target = side_sign * static_cast<float>(msg.roll) * _roll_to_pitch_gain * _pitch_angle_max
 				       + static_cast<float>(msg.pitch) * _pitch_sync * _pitch_angle_max;
-	// 判断是否需要从机自身姿态与遥控器姿态保持一致
-	const float stick_roll_att = self_roll + _roll_comp_gain * (stick_roll_target - self_roll);
-	const float stick_pitch_att = self_pitch + _pitch_comp_gain * (stick_pitch_target - self_pitch);
 
 // 3. 加权融合：遥控器主控，编队相对姿态作为辅助修正；yaw 暂时简单跟随 leader 姿态
 	constexpr float stick_ctrl_weight = 1.0f;
@@ -436,11 +406,11 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 		self_roll_level_corr = -((self_roll >= 0.0f) ? 1.0f : -1.0f) * _roll_level_gain * exceed_angle;
 	}
 
-	const float roll_sp = math::constrain(stick_ctrl_weight * stick_roll_att
+	const float roll_sp = math::constrain(stick_ctrl_weight * stick_roll_target
 					+ relative_ctrl_roll_weight * relative_roll_corr
 					+ self_roll_level_corr,
 					-_roll_angle_max, _roll_angle_max);
-	const float pitch_sp = math::constrain(stick_ctrl_weight * stick_pitch_att + relative_ctrl_pitch_weight * relative_pitch_corr,
+	const float pitch_sp = math::constrain(stick_ctrl_weight * stick_pitch_target + relative_ctrl_pitch_weight * relative_pitch_corr,
 					-_pitch_angle_max, _pitch_angle_max);
 	const float yaw_sp = matrix::wrap_pi(leader_yaw + yaw_rel_des);
 
