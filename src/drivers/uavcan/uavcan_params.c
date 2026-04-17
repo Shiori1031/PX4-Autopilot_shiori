@@ -604,49 +604,6 @@ PARAM_DEFINE_INT32(FORM_POSITION, 0);
 PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
 
 /**
- * Relative roll offset for follower tracking
- *
- * Desired roll offset relative to the leader.
- *
- * @unit rad
- * @min -1.57
- * @max 1.57
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_ROLL_OFS, 0.0f);
-
-/**
- * Relative pitch offset for follower tracking
- *
- * Desired pitch offset magnitude relative to the leader.
- * Left/right followers apply opposite signs internally.
- *
- * @unit rad
- * @min -1.57
- * @max 1.57
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PITCH_OFS, 0.0f);
-
-/**
- * Relative yaw offset for follower tracking
- *
- * Desired yaw offset relative to the leader.
- *
- * @unit rad
- * @min -3.14
- * @max 3.14
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_OFS, 0.0f);
-
-/**
  * Maximum follower roll attitude setpoint magnitude
  *
  * Roll stick command is scaled to this maximum absolute attitude.

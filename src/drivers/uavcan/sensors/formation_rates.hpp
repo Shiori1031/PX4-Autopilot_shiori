@@ -94,9 +94,6 @@ private:
 	param_t _param_formation_position_h;
 	param_t _param_roll_to_pitch_gain_h;
 	param_t _param_yaw_throttle_gain_h;
-	param_t _param_roll_rel_offset_h;
-	param_t _param_pitch_rel_offset_h;
-	param_t _param_yaw_rel_offset_h;
 	param_t _param_roll_angle_max_h;
 	param_t _param_pitch_angle_max_h;
 	param_t _param_roll_level_threshold_h;
@@ -120,9 +117,6 @@ private:
 	int32_t _formation_position{0};
 	float _roll_to_pitch_gain{2.0f};
 	float _yaw_throttle_gain{0.05f};
-	float _roll_rel_offset{0.0f};
-	float _pitch_rel_offset{0.0f};
-	float _yaw_rel_offset{0.0f};
 	float _roll_angle_max{0.52f};
 	float _pitch_angle_max{0.35f};
 	float _roll_level_threshold{0.2618f};

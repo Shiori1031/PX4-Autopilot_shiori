@@ -54,9 +54,6 @@ FormationRatesBridge::FormationRatesBridge(uavcan::INode &node, NodeInfoPublishe
 	_param_formation_position_h = param_find("FORM_POSITION");
 	_param_roll_to_pitch_gain_h = param_find("FORM_R2P_GAIN");
 	_param_yaw_throttle_gain_h = param_find("FORM_YAW_K");
-	_param_roll_rel_offset_h = param_find("FORM_ROLL_OFS");
-	_param_pitch_rel_offset_h = param_find("FORM_PITCH_OFS");
-	_param_yaw_rel_offset_h = param_find("FORM_YAW_OFS");
 	_param_roll_angle_max_h = param_find("FORM_ROLL_AMAX");
 	_param_pitch_angle_max_h = param_find("FORM_PTCH_AMAX");
 	_param_roll_level_threshold_h = param_find("FORM_RLEV_THR");
@@ -94,18 +91,6 @@ int FormationRatesBridge::init()
 
 	if (_param_yaw_throttle_gain_h != PARAM_INVALID) {
 		param_get(_param_yaw_throttle_gain_h, &_yaw_throttle_gain);
-	}
-
-	if (_param_roll_rel_offset_h != PARAM_INVALID) {
-		param_get(_param_roll_rel_offset_h, &_roll_rel_offset);
-	}
-
-	if (_param_pitch_rel_offset_h != PARAM_INVALID) {
-		param_get(_param_pitch_rel_offset_h, &_pitch_rel_offset);
-	}
-
-	if (_param_yaw_rel_offset_h != PARAM_INVALID) {
-		param_get(_param_yaw_rel_offset_h, &_yaw_rel_offset);
 	}
 
 	if (_param_roll_angle_max_h != PARAM_INVALID) {
@@ -211,18 +196,6 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 
 		if (_param_yaw_throttle_gain_h != PARAM_INVALID) {
 			param_get(_param_yaw_throttle_gain_h, &_yaw_throttle_gain);
-		}
-
-		if (_param_roll_rel_offset_h != PARAM_INVALID) {
-			param_get(_param_roll_rel_offset_h, &_roll_rel_offset);
-		}
-
-		if (_param_pitch_rel_offset_h != PARAM_INVALID) {
-			param_get(_param_pitch_rel_offset_h, &_pitch_rel_offset);
-		}
-
-		if (_param_yaw_rel_offset_h != PARAM_INVALID) {
-			param_get(_param_yaw_rel_offset_h, &_yaw_rel_offset);
 		}
 
 		if (_param_roll_angle_max_h != PARAM_INVALID) {
@@ -371,29 +344,24 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 	const float leader_p = static_cast<float>(msg.p);
 	const float leader_q = static_cast<float>(msg.q);
 
-	// 期望相对姿态（安装偏角 / 编队偏角）
-	// 初始安装角度，直接设置为0
-	const float roll_rel_des = _roll_rel_offset;
-	const float pitch_rel_des = _pitch_rel_offset * side_sign;
-	const float yaw_rel_des = _yaw_rel_offset;
-
 	// 相对误差
-	const float e_roll = (leader_roll + roll_rel_des) - self_roll;
-	const float e_pitch = (leader_pitch + pitch_rel_des) - self_pitch;
+	const float e_roll = leader_roll - self_roll;
+	const float e_pitch = leader_pitch - self_pitch;
 
 // 1. 相对姿态辅助修正：leader 姿态前馈 + 相对姿态误差反馈 + 速率差阻尼（把速率差值缩放转换为“姿态修正”）RATE_ERROR_TO_ATTITUDE_SCALE=0.2f
-	const float relative_roll_corr = _roll_ff * (leader_roll + roll_rel_des)
+	const float relative_roll_corr = _roll_ff * leader_roll
 				       + _roll_kp * e_roll
 				       + _roll_kd * (leader_p - self_roll_rate) * RATE_ERROR_TO_ATTITUDE_SCALE;
 
-	const float relative_pitch_corr = _pitch_ff * (leader_pitch + pitch_rel_des)
+	const float relative_pitch_corr = _pitch_ff * leader_pitch
 					+ _pitch_kp * e_pitch
 					+ _pitch_kd * (leader_q - self_pitch_rate) * RATE_ERROR_TO_ATTITUDE_SCALE;
 
 // 2. 遥控器姿态主控逻辑
-	const float stick_roll_target = static_cast<float>(msg.roll) * _roll_angle_max;// [-1,1] * 30° -> [-30°, 30°]
-	const float stick_pitch_target = side_sign * static_cast<float>(msg.roll) * _roll_to_pitch_gain * _pitch_angle_max
-				       + static_cast<float>(msg.pitch) * _pitch_sync * _pitch_angle_max;
+	const float stick_roll_target = static_cast<float>(msg.roll) * _roll_angle_max ;// [-1,1] * 30° -> [-30°, 30°]遥控器信号限幅
+	// “RC pitch 与机体正俯仰角符号相反，因此此处取反
+	const float stick_pitch_target = side_sign * (static_cast<float>(msg.roll) * _roll_to_pitch_gain * _pitch_angle_max
+				       + (-static_cast<float>(msg.pitch)) * _pitch_sync * _pitch_angle_max - self_roll  * _roll_angle_max);
 
 // 3. 加权融合：遥控器主控，编队相对姿态作为辅助修正；yaw 暂时简单跟随 leader 姿态
 	constexpr float stick_ctrl_weight = 1.0f;
@@ -412,7 +380,7 @@ void FormationRatesBridge::formation_rates_sub_cb(const uavcan::ReceivedDataStru
 					-_roll_angle_max, _roll_angle_max);
 	const float pitch_sp = math::constrain(stick_ctrl_weight * stick_pitch_target + relative_ctrl_pitch_weight * relative_pitch_corr,
 					-_pitch_angle_max, _pitch_angle_max);
-	const float yaw_sp = matrix::wrap_pi(leader_yaw + yaw_rel_des);
+	const float yaw_sp = matrix::wrap_pi(leader_yaw);
 
 	// 欧拉角转四元数
 	matrix::Quatf q_d(matrix::Eulerf(roll_sp, pitch_sp, yaw_sp));
