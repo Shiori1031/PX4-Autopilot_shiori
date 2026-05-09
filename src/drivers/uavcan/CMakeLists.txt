@@ -148,8 +148,8 @@ px4_add_module(
 		arming_status.hpp
 		attitude.cpp
 		attitude.hpp
-		formation_motor_pwm_sender.cpp
-		formation_motor_pwm_sender.hpp
+		# formation_motor_pwm_sender.cpp
+		# formation_motor_pwm_sender.hpp
 		formation_rates_sender.cpp
 		formation_rates_sender.hpp
 		beep.cpp
@@ -174,8 +174,8 @@ px4_add_module(
 		# Sensors
 		sensors/ahrs_solution.cpp
 		sensors/ahrs_solution.hpp
-		sensors/formation_motor_pwm.cpp
-		sensors/formation_motor_pwm.hpp
+		# sensors/formation_motor_pwm.cpp
+		# sensors/formation_motor_pwm.hpp
 		sensors/formation_rates.cpp
 		sensors/formation_rates.hpp
 		sensors/sensor_bridge.cpp
