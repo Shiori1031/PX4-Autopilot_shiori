@@ -43,7 +43,6 @@ set(msg_files
 	ActuatorOutputs.msg
 	ActuatorServosTrim.msg
 	ActuatorTest.msg
-	ActuatorTestSine.msg
 	AdcReport.msg
 	Airspeed.msg
 	AirspeedWind.msg
@@ -90,7 +89,6 @@ set(msg_files
 	FailsafeFlags.msg
 	FailureDetectorStatus.msg
 	FlightPhaseEstimation.msg
-	FormationMotorPwm.msg
 	FollowTarget.msg
 	FollowTargetEstimator.msg
 	FollowTargetStatus.msg

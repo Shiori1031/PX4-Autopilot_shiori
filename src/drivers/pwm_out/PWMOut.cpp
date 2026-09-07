@@ -207,25 +207,6 @@ void PWMOut::Run()
 		}
 	}
 
-	// Check for sine test output and apply if enabled
-	// Sine test bypasses normal function mapping for direct hardware testing
-	actuator_test_sine_s test_sine;
-	if (_actuator_test_sine_sub.update(&test_sine)) {
-		if (test_sine.enabled && test_sine.channel < _num_outputs) {
-			if (_pwm_initialized && (_pwm_mask & (1 << test_sine.channel))) {
-				// Convert normalized output [-1, 1] to PWM value [1500, 1900]
-				float sine_output = test_sine.output[test_sine.channel];
-				if (PX4_ISFINITE(sine_output)) {
-					// Map from [-1, 1] to [1500, 1900] microseconds
-					uint16_t pwm_value = (uint16_t)(1700.0f + sine_output * 200.0f);
-					pwm_value = math::constrain(pwm_value, (uint16_t)1500, (uint16_t)1900);
-					up_pwm_servo_set(test_sine.channel, pwm_value);
-					up_pwm_update(_pwm_mask);
-				}
-			}
-		}
-	}
-
 	/* update PWM status if armed or if disarmed PWM values are set */
 	bool pwm_on = true;
 

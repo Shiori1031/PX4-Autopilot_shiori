@@ -351,7 +351,7 @@ reboot
 可以用 PX4 shell 里的 `listener` 配合 `uavcan status` 做链路验证。
 需要注意：`listener` 观察的是 PX4 内部 uORB 主题，不是直接抓原始 CAN 帧；因此它更适合验证“消息已经被正确接收并转换为控制量”。
 
-主机侧建议先确认输入源正常：
+`主机侧`建议先确认输入源正常：
 
 ```bash
 listener manual_control_setpoint -r 5 -n 20
@@ -359,7 +359,7 @@ listener manual_control_setpoint -r 5 -n 20
 
 拨动遥控器时，应能看到 `throttle/yaw/roll/pitch` 持续变化，范围通常在 `[-1, 1]`。
 
-从机侧建议依次检查：
+`从机侧`建议依次检查：
 
 ```bash
 uavcan status

@@ -43,14 +43,6 @@ functions:
     IC_Engine_Choke: 452
     IC_Engine_Starter: 453
 
-    # Sine wave test output for frequency response testing
-    Sine_Test:
-      start: 460
-      count: 8
-      note:
-        condition: "CA_SINE_TST_EN==0"
-        text: "Sine test needs to be enabled via CA_SINE_TST_EN parameter."
-
     # Add your own here:
     #MyCustomFunction: 10000
 

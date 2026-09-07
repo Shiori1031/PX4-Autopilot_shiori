@@ -72,7 +72,6 @@
 #include <uORB/topics/actuator_motors.h>
 #include <uORB/topics/actuator_servos.h>
 #include <uORB/topics/actuator_servos_trim.h>
-#include <uORB/topics/actuator_test_sine.h>
 #include <uORB/topics/control_allocator_status.h>
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/vehicle_control_mode.h>
@@ -80,7 +79,6 @@
 #include <uORB/topics/vehicle_thrust_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/failure_detector_status.h>
-#include <uORB/topics/input_rc.h>
 
 class ControlAllocator : public ModuleBase<ControlAllocator>, public ModuleParams, public px4::ScheduledWorkItem
 {
@@ -141,8 +139,6 @@ private:
 
 	void publish_actuator_controls();
 
-	void publish_sine_test_output();
-
 	AllocationMethod _allocation_method_id{AllocationMethod::NONE};
 	ControlAllocation *_control_allocation[ActuatorEffectiveness::MAX_NUM_MATRICES] {}; 	///< class for control allocation calculations
 	int _num_control_allocation{0};
@@ -191,14 +187,12 @@ private:
 	uORB::Publication<actuator_motors_s>	_actuator_motors_pub{ORB_ID(actuator_motors)};
 	uORB::Publication<actuator_servos_s>	_actuator_servos_pub{ORB_ID(actuator_servos)};
 	uORB::Publication<actuator_servos_trim_s>	_actuator_servos_trim_pub{ORB_ID(actuator_servos_trim)};
-	uORB::Publication<actuator_test_sine_s>	_actuator_test_sine_pub{ORB_ID(actuator_test_sine)};
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _vehicle_control_mode_sub{ORB_ID(vehicle_control_mode)};
 	uORB::Subscription _failure_detector_status_sub{ORB_ID(failure_detector_status)};
-	uORB::Subscription _input_rc_sub{ORB_ID(input_rc)};
 
 	matrix::Vector3f _torque_sp;
 	matrix::Vector3f _thrust_sp;
@@ -216,13 +210,6 @@ private:
 	hrt_abstime _timestamp_sample{0};
 	hrt_abstime _last_status_pub{0};
 
-	// Sine wave test mode for additional servo output
-	hrt_abstime _sine_test_start_time{0};
-	bool _sine_test_initialized{false};
-	// Frequency sweep variables
-	float _current_sweep_freq{0.0f};
-	hrt_abstime _last_freq_change_time{0};
-
 	ParamHandles _param_handles{};
 	Params _params{};
 	bool _has_slew_rate{false};
@@ -231,18 +218,7 @@ private:
 		(ParamInt<px4::params::CA_AIRFRAME>) _param_ca_airframe,
 		(ParamInt<px4::params::CA_METHOD>) _param_ca_method,
 		(ParamInt<px4::params::CA_FAILURE_MODE>) _param_ca_failure_mode,
-		(ParamInt<px4::params::CA_R_REV>) _param_r_rev,
-		(ParamInt<px4::params::CA_SINE_TST_EN>) _param_sine_test_enable,
-		(ParamInt<px4::params::CA_SINE_TST_CH>) _param_sine_test_channel,
-		(ParamFloat<px4::params::CA_SINE_TST_FREQ>) _param_sine_test_freq,
-		(ParamFloat<px4::params::CA_SINE_TST_AMP>) _param_sine_test_amplitude,
-		(ParamFloat<px4::params::CA_SINE_TST_OFS>) _param_sine_test_offset,
-		(ParamInt<px4::params::CA_SINE_TST_MODE>) _param_sine_test_mode,
-		(ParamFloat<px4::params::CA_SINE_TST_FMIN>) _param_sine_test_freq_min,
-		(ParamFloat<px4::params::CA_SINE_TST_FMAX>) _param_sine_test_freq_max,
-		(ParamFloat<px4::params::CA_SINE_TST_STEP>) _param_sine_test_freq_step,
-		(ParamFloat<px4::params::CA_SINE_TST_TIME>) _param_sine_test_step_time,
-		(ParamInt<px4::params::CA_SINE_RC_CHK>) _param_sine_rc_check
+		(ParamInt<px4::params::CA_R_REV>) _param_r_rev
 	)
 
 };
