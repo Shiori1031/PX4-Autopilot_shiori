@@ -2,7 +2,13 @@
 
 ## 1. 功能概述
 
-为 PX4 新增了一套基于 UAVCAN 的编队姿态控制功能，用于三机刚性连接编队飞行系统。中央主飞控读取遥控器输入，同时广播主机实际姿态角与机体系角速度；左右从飞控按各自 `FORM_POSITION` 在本地完成控制解算，然后在 Offboard attitude 模式下执行。
+为 PX4 新增了一套基于 UAVCAN 的编队姿态控制功能，用于三机刚性连接编队飞行系统。当前架构为**"主机发送期望控制姿态 + 从机跟随与铰链修正 + 分配器执行级补偿"**：
+
+- 中央主飞控通过 DroneCAN 广播**主机期望控制姿态**：主机姿态设定（`vehicle_attitude_setpoint.q_d` 反解出的滚转/俯仰角）、期望滚转速率（`vehicle_rates_setpoint.roll`）、推力设定（`att_sp.thrust_body[0]`）与偏航速率指令（手动模式取 `rates.yaw`，自主模式取 `yaw_sp_move_rate`）；
+- 左右从飞控按各自 `FORM_POSITION`，把主机期望控制姿态**合成为自身的姿态设定**（跟随主机滚转/俯仰 + 铰链运动学前馈补偿 + 航向保持 + 推力透传），在 Offboard attitude 模式下执行；
+- 从机的 `ControlAllocator` 在力矩分配前做两项执行级补偿：滚转力矩→俯仰通道混控（翼尖铰链结构耦合）、偏航力矩→转弯外侧机增推。
+
+由于指令源是主机的**期望控制姿态（设定值）**而非实测值，主机在手动与自主（AUTO/MISSION 等）模式下都能带动编队飞行；从机与主机控制器接收同一目标，两机各自闭环收敛，天然同步。
 
 当前实现面向 `make cuav_7-nano_default`，相关功能已经通过板级配置编进固件。
 
@@ -19,10 +25,11 @@
 
 | 角色 | 文件 | 说明 |
 | ---- | ---- | ---- |
-| 自定义消息 | `src/drivers/uavcan/libdronecan/dsdl/dronecan/formation/20040.ControlInput.uavcan` | 定义编队控制广播消息 `throttle/yaw/roll/pitch/att_roll/att_pitch/att_yaw/p/q/r/flags` |
-| 主机发送器 | `src/drivers/uavcan/formation_rates_sender.{hpp,cpp}` | 订阅 `manual_control_setpoint`、`vehicle_attitude`、`vehicle_angular_velocity`，广播 `ControlInput` |
-| UAVCAN 接收器 | `src/drivers/uavcan/sensors/formation_rates.{hpp,cpp}` | 接收 `ControlInput`，在从机本地完成控制解算并发布 `offboard_control_mode` 和 `vehicle_attitude_setpoint` |
-| 参数配置 | `src/drivers/uavcan/uavcan_params.c` | 定义当前实际生效的编队参数 |
+| 自定义消息 | `src/drivers/uavcan/libdronecan/dsdl/dronecan/formation/20040.ControlInput.uavcan` | 定义编队控制广播消息 `thrust/pitch/yaw/roll_target/roll_rate_target/flags` |
+| 主机发送器 | `src/drivers/uavcan/formation_rates_sender.{hpp,cpp}` | 订阅 `vehicle_attitude_setpoint`、`vehicle_rates_setpoint`、`vehicle_status`，把主机期望控制姿态封装后广播 |
+| UAVCAN 接收器 | `src/drivers/uavcan/sensors/formation_rates.{hpp,cpp}` | 接收 `ControlInput`，在从机本地合成姿态设定并发布 `offboard_control_mode` 和 `vehicle_attitude_setpoint` |
+| 分配器定制 | `src/modules/control_allocator/ControlAllocator.{hpp,cpp}` | 从机执行级补偿：滚转→俯仰力矩混控、偏航→外侧机增推 |
+| 参数配置 | `src/drivers/uavcan/uavcan_params.c`、`src/modules/control_allocator/module.yaml` | 定义编队参数（`FORM_*`）与分配器混控增益（`CA_R2P_K`） |
 | 启动接入 | `src/drivers/uavcan/uavcan_main.cpp`、`src/drivers/uavcan/sensors/sensor_bridge.cpp` | 根据参数和板级开关自动初始化发送器/接收器 |
 | 板级配置 | `boards/cuav/7-nano/default.px4board` | 开启 `CONFIG_UAVCAN_FORMATION_RATES_SENDER` 与 `CONFIG_UAVCAN_SENSOR_FORMATION_RATES` |
 
@@ -30,21 +37,16 @@
 
 ### 3.1 UAVCAN 消息载体
 
-当前实现使用自定义 DroneCAN 消息 `dronecan::formation::ControlInput`，字段如下：
+当前实现使用自定义 DroneCAN 消息 `dronecan::formation::ControlInput`，携带主机期望控制姿态，字段如下：
 
 | 字段 | 类型 | 含义 | 取值范围 |
 | ---- | ---- | ---- | ---- |
-| `throttle` | `float16` | 主机油门输入 | `[-1, 1]` |
-| `yaw` | `float16` | 主机偏航输入 | `[-1, 1]` |
-| `roll` | `float16` | 主机滚转输入 | `[-1, 1]` |
-| `pitch` | `float16` | 主机俯仰输入 | `[-1, 1]` |
-| `att_roll` | `float16` | 主机滚转姿态角 | `rad` |
-| `att_pitch` | `float16` | 主机俯仰姿态角 | `rad` |
-| `att_yaw` | `float16` | 主机偏航姿态角 | `rad` |
-| `p` | `float16` | 主机机体系 x 轴角速度 | `rad/s` |
-| `q` | `float16` | 主机机体系 y 轴角速度 | `rad/s` |
-| `r` | `float16` | 主机机体系 z 轴角速度 | `rad/s` |
-| `flags` | `uint8` | 状态位 | 位掩码 |
+| `thrust` | `float16` | 主机推力设定（`att_sp.thrust_body[0]`） | `[0, 1]` |
+| `pitch` | `float16` | 主机俯仰姿态设定（`att_sp.q_d` 反解 `euler.theta()`） | `rad` |
+| `yaw` | `float16` | 主机偏航速率指令（手动 `rates.yaw` / 自主 `yaw_sp_move_rate`） | `rad/s` |
+| `roll_target` | `float16` | 主机滚转姿态设定（`att_sp.q_d` 反解 `euler.phi()`） | `rad` |
+| `roll_rate_target` | `float16` | 主机期望滚转速率（`rates_sp.roll`，铰链前馈参考量） | `rad/s` |
+| `flags` | `uint8` | 状态位（`FLAG_VALID`） | 位掩码 |
 
 当前发送频率为 300 Hz：
 
@@ -53,36 +55,43 @@
 static constexpr unsigned MAX_RATE_HZ = 300;
 ```
 
-### 3.2 取值范围来源
+### 3.2 取值范围与数据语义
 
-主机发送端读取的是 PX4 的 `manual_control_setpoint`。这个主题本身约定 `roll/pitch/yaw/throttle` 为 `[-1, 1]` 归一化量，因此：
+主机发送端读取的是**主机控制器正在跟踪的设定值**，而不是遥控器原始输入或实测姿态：
 
 ```cpp
 // src/drivers/uavcan/formation_rates_sender.cpp
-_manual_sub.copy(&manual);
+vehicle_attitude_setpoint_s att_sp{};
+_vehicle_attitude_setpoint_sub.copy(&att_sp);
+
+vehicle_rates_setpoint_s rates_sp{};
+_vehicle_rates_setpoint_sub.copy(&rates_sp);
+
+matrix::Quatf q_sp(att_sp.q_d);
+matrix::Eulerf euler_sp(q_sp);
 ```
 
-这里的 `copy()` 只是把当前 uORB 数据拷贝出来，不会在这里重新归一化；如果上游是 PX4 标准遥控器输入链路，那么拷出来时已经是 `[-1, 1]`。发送端里再用 `math::constrain(..., -1.0f, 1.0f)`，只是做一层保险限制。
-油门也是 `[-1, 1]` 实际代码使用会进行`(throttle + 1.f) * 0.5f`处理转换到 `[0, 1]`
+- `roll_target / pitch` 来自 `att_sp.q_d`（姿态控制器目标四元数）的反解：手动模式下约等于摇杆映射结果（含主机侧姿态整形），自主模式下是导航外环输出；
+- `roll_rate_target` 装载 `rates_sp.roll`（期望滚转速率），作为从机铰链修正的前馈参考；
+- `thrust` 装载 `att_sp.thrust_body[0]`（主机推力设定），发送前 `constrain` 到 `[0, 1]`；
+- `yaw` 按主机飞行模式切换数据源：
+  - 手动姿态操纵模式（MANUAL / STAB / ACRO / ALTCTL / POSCTL）：取 `rates.yaw`（操纵杆偏航已折算在内）；
+  - 自主/半自主模式（AUTO / MISSION / OFFBOARD 等）：取 `att_sp.yaw_sp_move_rate`（导航解算的偏航速率）。
 
-### 3.3 传输方式
+背景说明：手动模式下 `fw_att_control` 发布的 `att_sp.yaw_sp_move_rate` 保持零初始化值（`0.0f` 是有限值，`PX4_ISFINITE()` 检查会误通过），因此必须显式判断 `nav_state` 才能取到真正的偏航指令源。
 
-```text
-主机广播一条 ControlInput
-  -> 左右从机都接收
-  -> 每个从机按本机 FORM_POSITION 判断自己是左机还是右机
-  -> 用同一份代码、本地按符号完成左右差异化解算
-```
+发送门控：固定翼或过渡模式，且 `att_sp` 时间戳距今不超过 500 ms。
+
 
 ## 4. 当前控制映射关系
 
-控制方式: 当前改为“遥控器姿态主控 + 相对姿态辅助修正”结构，由从机发布 `vehicle_attitude_setpoint` 注入固定翼姿态环，再由 `fw_att_control` 继续下发 `vehicle_rates_setpoint` 给速率环。
+控制方式：**主机发送期望控制姿态、从机跟随与铰链修正、分配器执行级补偿**。从机发布 `vehicle_attitude_setpoint` 注入固定翼姿态环，由 `fw_att_control` 继续下发 `vehicle_rates_setpoint` 给速率环；从机的 `ControlAllocator` 在力矩/推力分配前再叠加编队定制。
 
 因此：
-- 从机 `roll / pitch` 姿态设定值由两部分共同决定，但当前以遥控器姿态主控部分为主。
-- `FORM_R2P_GAIN` 当前承担 `roll -> pitch` 的耦合作用，在遥控器主控支路中把主机滚转输入映射为左右从机反向俯仰。
-- `FORM_YAW_K` 当前同时承担两部分作用：从机侧偏航时外侧机附加油门，以及主机侧偏航时同步加速。
-- `yaw` 当前先采用简单跟随：从机直接发布 `leader_yaw` 到姿态设定值中，后续再进一步细化专门的偏航控制律。
+- 从机 `roll/pitch` 姿态设定值直接跟随主机的姿态设定（`roll_target / pitch`），从机不再做摇杆重映射；
+- `pitch` 通道额外叠加一项铰链运动学前馈：`side_sign * FORM_HINGE_K * roll_rate_target`，用于补偿编队滚转时的翼尖铰链几何耦合；
+- 从机姿态设定的航向分量保持**自身当前航向**（不接收航向位置指令），偏航运动由 `yaw_sp_move_rate = msg.yaw` 与滚转协调转弯共同决定；
+- 从机推力直接透传主机推力设定；转弯外侧增推与滚转→俯仰力矩混控均移到 `ControlAllocator` 中完成；
 - 从机控制链只有在自身飞行模式已经切入 Offboard 时才真正接管。
 
 ### 4.1 从机本地解算
@@ -91,82 +100,66 @@ _manual_sub.copy(&manual);
 - 右机 `side_sign = -1`
 
 定义：
-- 主机姿态角：`leader_roll / leader_pitch / leader_yaw`
-- 主机角速度：`leader_p / leader_q`
-- 从机姿态角：`self_roll / self_pitch`
-- 从机角速度：`self_roll_rate / self_pitch_rate`
+- 主机姿态设定：`roll_target / pitch`（`msg.roll_target / msg.pitch`）
+- 主机期望滚转速率：`roll_rate_target`（`msg.roll_rate_target`）
+- 从机自身航向：`self_yaw`
 
-相对误差为：
-
-```text
-e_roll  = leader_roll  - self_roll
-e_pitch = leader_pitch - self_pitch
-```
-
-从机姿态设定值先分别计算两部分：
+**从机姿态设定值**计算：
 
 ```text
-relative_roll_corr  = FORM_ROLL_FF * leader_roll
-                    + FORM_ROLL_KP * e_roll
-                    + FORM_ROLL_KD * (leader_p - self_roll_rate) * 0.2
+roll_sp  = constrain(msg.roll_target, -FORM_ROLL_AMAX, +FORM_ROLL_AMAX)
 
-relative_pitch_corr = FORM_PITCH_FF * leader_pitch
-                    + FORM_PITCH_KP * e_pitch
-                    + FORM_PITCH_KD * (leader_q - self_pitch_rate) * 0.2
+pitch_sp = constrain(msg.pitch + side_sign * FORM_HINGE_K * msg.roll_rate_target,
+                     -FORM_PTCH_AMAX, +FORM_PTCH_AMAX)
 
-stick_roll_target = roll * FORM_ROLL_AMAX
-
-stick_pitch_target = side_sign * roll * FORM_R2P_GAIN * FORM_PTCH_AMAX
-                   - pitch * FORM_PITCH_SYNC * FORM_PTCH_AMAX
-
-self_roll_level_corr = 0
-if abs(self_roll) > FORM_RLEV_THR:
-    self_roll_level_corr = -sign(self_roll) * FORM_RLEV_K * (abs(self_roll) - FORM_RLEV_THR)
-
-roll_sp  = constrain(1.0 * stick_roll_target + 0.2 * relative_roll_corr
-                     + self_roll_level_corr,
-                     -FORM_ROLL_AMAX, FORM_ROLL_AMAX)
-pitch_sp = constrain(1.0 * stick_pitch_target + 0.1 * relative_pitch_corr,
-                     -FORM_PTCH_AMAX, FORM_PTCH_AMAX)
-yaw_sp   = wrap_pi(leader_yaw)
+yaw_sp   = wrap_pi(self_yaw)            # 保持自身航向
 
 q_d = quat_from_euler(roll_sp, pitch_sp, yaw_sp)
 
-base_thrust   = (throttle + 1) / 2
-outer_boost   = left ? max(yaw, 0) : max(-yaw, 0)
-thrust_x      = base_thrust + outer_boost * FORM_YAW_K
+yaw_sp_move_rate = msg.yaw              # 偏航速率指令（前馈通道）
+
+thrust_body[0]   = constrain(msg.thrust, 0, 1)   # 主机推力直接透传
 ```
 
 说明：
-- 当前 `roll/pitch` 辅助修正权重是代码内固定常量，未做成参数。
-- 当前实现中 `roll` 辅助权重为 `0.2`，`pitch` 辅助权重为 `0.1`。
-- 当前实现里 `manual_control_setpoint.pitch` 的符号方向与正俯仰姿态角相反，因此在生成 `stick_pitch_target` 时对 `pitch` 输入做了一次取反。
-- 当从机自身滚转绝对值超过 `FORM_RLEV_THR` 时，会额外叠加一个反向回正姿态修正；随着滚转角回到阈值附近，该修正会自然衰减到 `0`。
-- `FORM_ROLL_KD / FORM_PITCH_KD` 作用在相对角速度误差上，并通过固定比例 `0.2` 转成姿态修正量；默认值当前均为 `0.0`。
-- `FORM_YAW_FF / FORM_YAW_KP / FORM_YAW_KD` 在当前姿态注入版本中暂未参与实际偏航修正，保留给后续专门的 yaw 控制逻辑。
-- 当前 `FORM_ROLL_RMAX / FORM_PTCH_RMAX / FORM_YAW_RMAX` 保留在参数表中，但在姿态注入版本里不参与实际限幅。
+- 从机无需任何遥控器输入：主机在手动或自主模式下，从机都按同一份期望控制姿态飞行；
+- `FORM_HINGE_K` 的量纲是时间（s）：`[s] × [rad/s] = [rad]`，物理含义是"主机滚转速率→从机俯仰补偿"的等效几何耦合时间尺度；
+- 铰链修正与主机滚转**意图**同相位（前馈），不需要等从机实测出现误差后才补偿；
+- 左右从机修正方向相反（`side_sign` 镜像），对应两侧铰链的运动学镜像关系；
+- 从机航向分量不做位置指令（保持自身航向），体现链翼构型"铰链约束偏航、从机随编队整体转向"的特征；固定翼从机的转弯实际由滚转协调转弯完成；
+- 推力不做从机侧增推，直接透传主机推力设定（增推逻辑见 4.3 节）。
 
-主机侧还会在固定翼速率控制输出阶段增加一项偏航同步加速：
+### 4.2 物理意义
+
+- 主机滚转设定直接作为左、右从机的滚转设定（同一目标），三机滚转动作同源、无跟踪滞后链条；
+- 主机以速率 `p` 滚转（或计划滚转）时，翼尖铰链约束迫使两侧从机产生几何上必需的点头/抬头运动；`FORM_HINGE_K * p` 作为前馈量叠加到从机俯仰设定，让从机主动完成该运动，而不是被动承受铰链结构载荷；
+- 左右从机铰链修正方向相反（`side_sign` 镜像），对应链翼构型"铰链释放相对滚转、约束相对偏航"的约束特征；
+- 从机航向保持自身，仅通过 `yaw_sp_move_rate` 接收偏航速率意图；固定翼从机的实际转弯由 `fw_att_control` 的协调转弯控制器按滚转生成（详见 5.3 节），与主机滚转同源；
+- 从机推力透传主机推力设定：主机在自主模式（TECS 推力输出）或手动模式（油门映射）下，从机都能正确跟随；
+- 主机侧仍保留一项偏航同步加速（`FixedwingRateControl` 内，仅主机且 `UAVCAN_PUB_FORM=1` 时生效）：
 
 ```text
 master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
 ```
 
-其中这项逻辑只在 `FORM_FOLLOWER_EN == 0` 且 `UAVCAN_PUB_FORM == 1` 时生效，也就是主机身份并实际开启编队广播时生效；从机身份下不在 `FixedwingRateControl.cpp` 里执行这一步。
+### 4.3 分配器执行级补偿（从机）
 
-### 4.2 物理意义
+从机 `ControlAllocator` 在控制设定向量 `c = [τx, τy, τz, Tx, Ty, Tz]` 组装完成后、`allocate()` 执行前做两项补偿：
 
-- 主机向右滚时，左右从机会根据主机真实滚转姿态与从机自身滚转姿态的相对误差生成辅助滚转修正；同时 `FORM_R2P_GAIN` 会在遥控器主控支路里让左机抬头、右机低头，形成整体右滚。
-- 主机向左滚时，左右从机相反动作，形成整体左滚。
-- 主机 `leader_roll / leader_pitch` 通过 `FORM_ROLL_FF / FORM_PITCH_FF` 显式进入辅助修正项，提高从机跟随速度。
-- 主机与从机的姿态差、角速度差分别通过 `KP / KD` 项形成反馈与阻尼，其中 `KD` 通过固定比例换算成姿态修正量。
-- 遥控器主控支路当前直接生成 `roll/pitch` 姿态目标，因此当前从机控制不是纯相对姿态控制，而是“遥控器主控姿态 + 相对姿态辅助修正”的叠加结构。
-- 当前辅助修正支路中，`pitch` 轴权重最小，为 `0.1`；`roll` 辅助权重为 `0.2`，因此编队修正对俯仰的介入更弱。
-- 当前 `yaw` 先采用简单跟随，即把 `leader_yaw` 写入姿态设定值；固定翼姿态控制器仍主要显式使用 `roll/pitch` 设定值，后续再补专门的 yaw 控制设计。
-- 主机右偏航时，左右从机方向舵同向右偏，左机作为外侧机增加油门。
-- 主机左偏航时，左右从机方向舵同向左偏，右机作为外侧机增加油门。
-- 主机自身在左右偏航时也会按 `0.5 * abs(manual.yaw) * FORM_YAW_K` 同步增加油门，用于三机整体偏航阶段的共同推力补偿。
-- 当前实现不再单独配置相对姿态偏角参数，默认直接以主机姿态作为相对姿态辅助支路参考。
+```cpp
+// src/modules/control_allocator/ControlAllocator.cpp
+if (_is_follower) {
+    // 1) 铰链耦合：把部分滚转力矩引入俯仰通道（左右从机符号相反）
+    c[0](1) += c[0](0) * _roll_to_pitch_mix * _side_sign;
+    // 2) 转弯外侧增推：按偏航力矩设定单侧截断叠加推力（只增不减）
+    c[0](3) = math::constrain(c[0](3) + math::max(_side_sign * c[0](2), 0.f) * _yaw_throttle_gain, 0.f, 1.f);
+}
+```
+
+- `_roll_to_pitch_mix` 来自 `CA_R2P_K`（滚转→俯仰混控增益）：从机滚转时升降舵联动一个俯仰修正，用于补偿铰链传递的结构耦合载荷；
+- `_yaw_throttle_gain` 来自 `FORM_YAW_K`（外侧增推系数）：转弯时按从机的偏航力矩设定（`τz`）给**外侧**从机加推（左转时右机增推、右转时左机增推——`side_sign` 与 `τz` 乘积单侧截断自动选出外侧机），内侧机不动作；
+- 力矩混控的左右符号由 `side_sign` 自动镜像，无需给左右从机分别配置相反系数；
+- 主机（`FORM_FOLLOWER_EN=0`）下这两项不生效；第二分配实例（多矩阵场景）未包含该定制，当前三机均为单一固定翼有效性矩阵，不受影响。
 
 ## 5. 代码流程
 
@@ -176,23 +169,18 @@ master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
 - 启动 300 Hz 定时器
 
 周期执行时：
-1. 读取 `manual_control_setpoint`
-2. 如果遥控器数据超过 500 ms 未更新，或 `valid=false`，则停止发送
-3. 检查四个输入是否为有限值
-4. 读取 `vehicle_status`
-5. 仅在固定翼模式或过渡模式下继续工作
-6. 将 `throttle/yaw/roll/pitch` 限幅到 `[-1, 1]`
-7. 读取主机 `vehicle_attitude` 和 `vehicle_angular_velocity`
-8. 将主机欧拉角 `att_roll/att_pitch/att_yaw` 与 `p/q/r` 一并打包到 `ControlInput`
-9. 设置 `flags` 并广播单条 `ControlInput`
+1. 读取 `vehicle_attitude_setpoint`（主机姿态设定），超过 500 ms 未更新则停止发送
+2. 读取 `vehicle_status`，仅在固定翼模式或过渡模式下继续工作
+3. 读取 `vehicle_rates_setpoint`（含期望滚转速率 `rates_sp.roll`）
+4. 反解 `att_sp.q_d` 得到滚转/俯仰设定角 `euler_sp.phi() / euler_sp.theta()`
+5. 按 `nav_state` 选择偏航指令源（手动模式取 `rates.yaw`，自主模式取 `att_sp.yaw_sp_move_rate`；非有限值时回退）
+6. 将 `thrust/pitch/yaw/roll_target/roll_rate_target` 打包到 `ControlInput`
+7. 设置 `flags = FLAG_VALID` 并广播单条 `ControlInput`
 
 ### 5.2 从机端：formation_rates
 
 初始化时：
-- 查找 `FORM_FOLLOWER_EN`、`FORM_POSITION`、`FORM_R2P_GAIN`、`FORM_YAW_K`
-- 查找相对姿态辅助参数 `FORM_ROLL_FF / FORM_ROLL_KP / FORM_ROLL_KD / FORM_PITCH_FF / FORM_PITCH_KP / FORM_PITCH_KD`
-- 查找姿态幅值参数 `FORM_ROLL_AMAX / FORM_PTCH_AMAX`
-- 查找前馈/反馈阻尼参数 `FORM_ROLL_FF / KP / KD`、`FORM_PITCH_FF / KP / KD`
+- 查找参数 `FORM_FOLLOWER_EN / FORM_POSITION / FORM_HINGE_K / FORM_ROLL_AMAX / FORM_PTCH_AMAX`
 - 注册 `ControlInput` 订阅回调
 
 接收回调时：
@@ -200,26 +188,31 @@ master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
 2. 检查 `FORM_FOLLOWER_EN`，未开启则直接返回
 3. 检查 `flags` 里的 `FLAG_VALID`
 4. 检查 `FORM_POSITION` 是否为左机或右机
-5. 读取从机自身 `vehicle_attitude`、`vehicle_angular_velocity` 和 `vehicle_status`
-6. 计算本机 `self_roll/self_pitch/self_yaw` 与 `self_roll_rate/self_pitch_rate`
-7. 计算 `side_sign` 与偏航外侧机油门增量
-8. 发布 `offboard_control_mode`，其中 `attitude=true`
-9. 如果当前不是 Offboard，则直接退出这次回调，不发布 `vehicle_attitude_setpoint`
-10. 如果当前已经是 Offboard，则继续按“遥控器主控姿态 + 相对姿态辅助修正”逻辑生成 `vehicle_attitude_setpoint`
-11. 由 `FixedwingAttitudeControl` 将姿态设定值转为 `vehicle_rates_setpoint`
-12. 再由 `FixedwingRateControl` 完成执行
+5. 读取从机自身 `vehicle_attitude`（取 `self_yaw`）和 `vehicle_status`
+6. 发布 `offboard_control_mode`，其中 `attitude=true`
+7. 如果当前不是 Offboard，则直接退出这次回调，不发布 `vehicle_attitude_setpoint`
+8. 如果当前已经是 Offboard，则按"跟随 + 铰链修正"逻辑生成 `vehicle_attitude_setpoint`：
+   - `roll_sp = clip(msg.roll_target)`
+   - `pitch_sp = clip(msg.pitch + side_sign * FORM_HINGE_K * msg.roll_rate_target)`
+   - `yaw_sp = self_yaw`，`yaw_sp_move_rate = msg.yaw`
+   - `thrust_body[0] = clip(msg.thrust)`
+9. 由 `FixedwingAttitudeControl` 将姿态设定值转为 `vehicle_rates_setpoint`
+10. 由 `FixedwingRateControl` 生成力矩/推力设定，再由 `ControlAllocator` 叠加从机定制后解算执行
 
 ### 5.3 下游控制链
 
 ```text
 FormationRatesBridge
   -> offboard_control_mode(attitude=true)
-  -> vehicle_attitude_setpoint
+  -> vehicle_attitude_setpoint (q_d / yaw_sp_move_rate / thrust_body)
   -> Commander 进入/维持 Offboard attitude 控制链
-  -> FixedwingAttitudeControl 将姿态设定值转换为 vehicle_rates_setpoint
-  -> FixedwingRateControl 执行角速率控制
-  -> 主机在 FixedwingRateControl 内按 manual.yaw 叠加偏航同步加速
+  -> FixedwingAttitudeControl：从 q_d 取 roll/pitch 生成速率设定；
+     偏航由协调转弯控制器按滚转生成（不消费 q_d 的 yaw 分量与 yaw_sp_move_rate）
+  -> FixedwingRateControl 生成 vehicle_torque_setpoint / vehicle_thrust_setpoint
+  -> ControlAllocator（从机）：叠加滚转→俯仰混控与外侧增推后解算到舵面/电机
 ```
+
+注意：当前 `fw_att_control` 在 attitude 模式下**只消费 `q_d` 的 roll/pitch 分量**，从机偏航速率实际由协调转弯控制器按滚转设定生成（`r_sp ≈ tan(φ)·cos(θ)·g/V`），不读取 `yaw_sp_move_rate`。因此从机实际转弯由滚转主导、与主机同源；`yaw_sp_move_rate` 写入姿态设定属于预留通道，待后续为固定翼偏航前馈打补丁后才能生效。
 
 Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现没有额外的编队私有超时参数。
 
@@ -233,9 +226,11 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `UAVCAN_NODE_ID` | 本机节点 ID，主机固定为 `1` |
 | `UAVCAN_PUB_FORM` | 发送器使能，设为 `1` |
 | `FORM_FOLLOWER_EN` | 主机应设为 `0`，用于区分主机/从机身份 |
-| `FORM_YAW_K` | 主机偏航同步加速系数，同时也是从机外侧偏航增油系数 |
+| `FORM_YAW_K` | 主机偏航同步加速系数（`FixedwingRateControl` 内，仅主机生效） |
 
 ### 6.2 从机参数（左/右机）
+
+基础通信参数：
 
 | 参数 | 说明 |
 | ---- | ---- |
@@ -245,37 +240,41 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `FORM_FOLLOWER_EN` | 从机内部处理开关，设为 `1` |
 | `FORM_POSITION` | 左机设 `1`，右机设 `2` |
 
-| `FORM_R2P_GAIN` | 遥控器滚转输入到俯仰通道的耦合增益 |
-| `FORM_YAW_K` | 偏航时外侧从机油门增益 |
-| `FORM_PITCH_SYNC` | 遥控器主控俯仰同步增益，作用前会先对 `pitch` 输入取反以对齐姿态角符号 |
+编队控制参数（`Formation Control` 组）：
+
+| 参数 | 默认 | 说明 |
+| ---- | ---- | ---- |
+| `FORM_HINGE_K` | 1.0 | 铰链修正前馈增益（单位：s）：`pitch += side_sign * FORM_HINGE_K * 主机期望滚转速率` |
+| `FORM_ROLL_AMAX` | 0.52 | 从机滚转姿态设定限幅（rad） |
+| `FORM_PTCH_AMAX` | 0.35 | 从机俯仰姿态设定限幅（rad，含铰链修正） |
+| `FORM_YAW_K` | 0.3 | 分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K` |
+
+分配器参数（`Control Allocation` 组，仅从机生效）：
+
+| 参数 | 默认 | 说明 |
+| ---- | ---- | ---- |
+| `CA_R2P_K` | 0.0 | 滚转→俯仰力矩混控增益：`τy += τx * CA_R2P_K * side_sign`（左右符号自动镜像） |
+
+其他：
+
+| 参数 | 说明 |
+| ---- | ---- |
 | `COM_OF_LOSS_T` | Offboard 丢失超时，使用 PX4 原生机制 |
 
-| `FORM_RLEV_THR` | 从机自身滚转触发自动回正的阈值 |
-| `FORM_RLEV_K` | 从机自身滚转自动回正增益 |
+### 6.3 参数变更说明（相对旧版）
 
-| `FORM_ROLL_AMAX` | 遥控器主控支路的最大滚转姿态角 |
-| `FORM_PTCH_AMAX` | 遥控器主控支路的最大俯仰姿态角 |
-| `FORM_ROLL_FF` | 滚转 leader 姿态前馈增益 |
-| `FORM_ROLL_KP` | 滚转相对姿态反馈比例增益 |
-| `FORM_ROLL_KD` | 滚转相对速率差阻尼增益 |
-| `FORM_PITCH_FF` | 俯仰 leader 姿态前馈增益 |
-| `FORM_PITCH_KP` | 俯仰相对姿态反馈比例增益 |
-| `FORM_PITCH_KD` | 俯仰相对速率差阻尼增益 |
+本版改造后，以下旧参数已**从固件中删除**（QGC 中不再出现，历史保存值失效）：
 
+`FORM_R2P_GAIN`、`FORM_RLEV_THR`、`FORM_RLEV_K`、`FORM_ROLL_FF / KP / KD`、`FORM_PITCH_FF / KP / KD`、`FORM_YAW_FF / KP / KD`、`FORM_ROLL_RMAX / PTCH_RMAX / YAW_RMAX`、`FORM_PITCH_SYNC`、`FORM_YAW_SYNC`。
 
-### 6.3 预留叠加参数
+对应的旧功能已由新架构替代：
 
-当前代码里以下参数保留在参数表中，但当前姿态注入版本不直接参与实际姿态设定值生成，保留给后续扩展或旧版速率逻辑参考：
+- 遥控器映射 → 主机发送姿态设定（从机不再需要摇杆输入）；
+- 相对姿态辅助（FF/KP/KD）→ 从机直接跟随主机设定 + 铰链前馈；
+- 滚转回正保护 → 由姿态设定限幅（`FORM_ROLL_AMAX / FORM_PTCH_AMAX`）与主机自身控制保障；
+- 俯仰同步/滚转耦合 → 铰链修正 `FORM_HINGE_K` + 分配器 `CA_R2P_K`。
 
-| 参数 | 当前状态 |
-| ---- | ---- |
-| `FORM_YAW_FF` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
-| `FORM_YAW_KP` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
-| `FORM_YAW_KD` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
-| `FORM_YAW_SYNC` | 当前 yaw 简单跟随版本中暂未参与实际偏航修正 |
-| `FORM_ROLL_RMAX` | 姿态注入版本中暂未参与实际限幅 |
-| `FORM_PTCH_RMAX` | 姿态注入版本中暂未参与实际限幅 |
-| `FORM_YAW_RMAX` | 姿态注入版本中暂未参与实际限幅 |
+⚠️ 升级固件后请检查 `CA_SV_CSx_TRQ_R`（升降舵滚转力矩系数）：若之前在 QGC 中设置过非零值，需清零，避免与 `CA_R2P_K` 双重叠加。
 
 ### 6.4 推荐配置示例
 
@@ -299,19 +298,12 @@ param set UAVCAN_NODE_ID 2
 param set UAVCAN_SUB_FORM 1
 param set FORM_FOLLOWER_EN 1
 param set FORM_POSITION 1
-param set FORM_R2P_GAIN 2.0
-param set FORM_YAW_K 0.3
+
+param set FORM_HINGE_K 1.0
 param set FORM_ROLL_AMAX 0.52
 param set FORM_PTCH_AMAX 0.35
-param set FORM_RLEV_THR 0.2618
-param set FORM_RLEV_K 1.0
-param set FORM_ROLL_FF 0.5
-param set FORM_PITCH_FF 0.5
-param set FORM_ROLL_KP 2.0
-param set FORM_ROLL_KD 0.0
-param set FORM_PITCH_KP 2.0
-param set FORM_PITCH_KD 0.0
-param set FORM_PITCH_SYNC 0.1
+param set FORM_YAW_K 0.3
+param set CA_R2P_K 0.0
 param set COM_OF_LOSS_T 1.0
 param save
 reboot
@@ -325,39 +317,36 @@ param set UAVCAN_NODE_ID 3
 param set UAVCAN_SUB_FORM 1
 param set FORM_FOLLOWER_EN 1
 param set FORM_POSITION 2
-param set FORM_R2P_GAIN 2.0
-param set FORM_YAW_K 0.3
+
+param set FORM_HINGE_K 1.0
 param set FORM_ROLL_AMAX 0.52
 param set FORM_PTCH_AMAX 0.35
-param set FORM_RLEV_THR 0.2618
-param set FORM_RLEV_K 1.0
-param set FORM_ROLL_FF 0.5
-param set FORM_PITCH_FF 0.5
-param set FORM_ROLL_KP 2.0
-param set FORM_ROLL_KD 0.0
-param set FORM_PITCH_KP 2.0
-param set FORM_PITCH_KD 0.0
-param set FORM_PITCH_SYNC 0.1
+param set FORM_YAW_K 0.3
+param set CA_R2P_K 0.0
 param set COM_OF_LOSS_T 1.0
 param save
 reboot
 ```
 
-从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
-主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。
+说明：
+- `CA_R2P_K` 建议先从 `0.0` 开始试飞（先验证基础跟随），确认正常后再逐步加入滚转→俯仰耦合；
+- `FORM_HINGE_K` 初始 `1.0`（等效 1 s 几何时间尺度），按试飞中铰链过渡过程的从机俯仰跟随效果调整；
+- 从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
+- 主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。
 
 ### 6.5 传输验证方法
 
 可以用 PX4 shell 里的 `listener` 配合 `uavcan status` 做链路验证。
-需要注意：`listener` 观察的是 PX4 内部 uORB 主题，不是直接抓原始 CAN 帧；因此它更适合验证“消息已经被正确接收并转换为控制量”。
+需要注意：`listener` 观察的是 PX4 内部 uORB 主题，不是直接抓原始 CAN 帧；因此它更适合验证"消息已经被正确接收并转换为控制量"。
 
-`主机侧`建议先确认输入源正常：
+`主机侧`建议先确认期望控制姿态源正常：
 
 ```bash
-listener manual_control_setpoint -r 5 -n 20
+listener vehicle_attitude_setpoint -r 5 -n 20
+listener vehicle_rates_setpoint -r 5 -n 20
 ```
 
-拨动遥控器时，应能看到 `throttle/yaw/roll/pitch` 持续变化，范围通常在 `[-1, 1]`。
+手动模式下拨动遥控器、或在自主模式下执行任务时，应能看到 `att_sp.q_d`、`thrust_body[0]` 与 `rates_sp.roll` 持续更新。
 
 `从机侧`建议依次检查：
 
@@ -375,7 +364,10 @@ listener offboard_control_mode -r 5 -n 20
 listener vehicle_attitude_setpoint -r 5 -n 20
 ```
 
-此时应能看到 `q_d` 与 `thrust_body[0]` 持续更新，并随主机姿态、主机 `p/q` 与从机 `FORM_POSITION` 发生对应变化。
+此时应能看到 `q_d` 与 `thrust_body[0]` 持续更新，并满足：
+- 从机 `q_d` 的滚转分量跟随主机姿态设定（`roll_target`）；
+- 从机 `q_d` 的俯仰分量 = 主机俯仰设定 + 铰链修正（左右从机符号相反，随主机滚转速率变化）；
+- `thrust_body[0]` 与主机推力设定一致。
 
 如果还想继续验证姿态环到速率环的下游转换，可以再执行：
 
@@ -383,7 +375,7 @@ listener vehicle_attitude_setpoint -r 5 -n 20
 listener vehicle_rates_setpoint -r 5 -n 20
 ```
 
-此时应能看到 `fw_att_control` 根据 `vehicle_attitude_setpoint` 继续生成的 `roll/pitch/yaw/thrust_body[0]` 更新。
+此时应能看到 `fw_att_control` 根据 `vehicle_attitude_setpoint` 继续生成的 `roll/pitch/yaw/thrust_body[0]` 更新（偏航通道由协调转弯按滚转生成）。
 
 如果 `listener vehicle_attitude_setpoint` 没有更新，优先检查：
 - 主机是否已开启 `UAVCAN_PUB_FORM=1`
@@ -391,3 +383,4 @@ listener vehicle_rates_setpoint -r 5 -n 20
 - 左右从机 `FORM_POSITION` 是否分别设为 `1/2`
 - 主从机 `UAVCAN_NODE_ID` 是否冲突
 - 从机当前是否已经切入 Offboard
+- 主从机固件是否为同一版本（消息格式在本次改造后已变更，新旧固件不兼容）

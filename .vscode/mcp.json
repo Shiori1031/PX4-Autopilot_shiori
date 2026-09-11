@@ -1,0 +1,7 @@
+{
+"servers": {
+"matlab": {
+"command": "/mnt/d/Programs/MATLAB/matlab-mcp-core-server-win64.exe"
+}
+}
+}

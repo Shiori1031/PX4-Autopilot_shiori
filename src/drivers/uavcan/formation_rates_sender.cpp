@@ -57,15 +57,11 @@ int FormationRatesSender::init()
 
 void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 {
-	// 获取最新的遥控输入, 范围均为[-1, 1]
-	manual_control_setpoint_s manual{};
-	_manual_sub.copy(&manual);
+	// 读取主机期望控制姿态，超过 500 ms 未更新则停止发送
+	vehicle_attitude_setpoint_s att_sp{};
+	_vehicle_attitude_setpoint_sub.copy(&att_sp);
 
-	if (hrt_elapsed_time(&manual.timestamp) > 500000 || !manual.valid) {
-		return;
-	}
-
-	if (!PX4_ISFINITE(manual.throttle) || !PX4_ISFINITE(manual.yaw) || !PX4_ISFINITE(manual.roll) || !PX4_ISFINITE(manual.pitch)) {
+	if (hrt_elapsed_time(&att_sp.timestamp) > 500000) {
 		return;
 	}
 
@@ -76,31 +72,41 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 		return;
 	}
 
-	vehicle_attitude_s vehicle_attitude{};
-	_vehicle_attitude_sub.copy(&vehicle_attitude);
-	matrix::Quatf q_att(vehicle_attitude.q);
-	matrix::Eulerf euler_att(q_att);
+	vehicle_rates_setpoint_s rates_sp{};
+	_vehicle_rates_setpoint_sub.copy(&rates_sp);
 
-	vehicle_angular_velocity_s angular_velocity{};
-	_vehicle_angular_velocity_sub.copy(&angular_velocity);
+	// 反解主机姿态设定，得到滚转/俯仰设定角
+	matrix::Quatf q_sp(att_sp.q_d);
+	matrix::Eulerf euler_sp(q_sp);
 
-	// 将 manual、主机姿态角与 p/q/r 一并封装到自定义 DroneCAN 消息中
-	dronecan::formation::ControlInput msg;
-	msg.throttle = math::constrain(manual.throttle, -1.0f, 1.0f);
-	msg.yaw = math::constrain(manual.yaw, -1.0f, 1.0f);
-	msg.roll = math::constrain(manual.roll, -1.0f, 1.0f);
-	msg.pitch = math::constrain(manual.pitch, -1.0f, 1.0f);
-	msg.att_roll = euler_att.phi();
-	msg.att_pitch = euler_att.theta();
-	msg.att_yaw = euler_att.psi();
-	msg.p = angular_velocity.xyz[0];
-	msg.q = angular_velocity.xyz[1];
-	msg.r = angular_velocity.xyz[2];
-	msg.flags = dronecan::formation::ControlInput::FLAG_VALID;
+	// 偏航指令源：手动姿态操纵模式使用速率设定（操纵杆偏航已折算在内），
+	// 自主模式使用导航解算的偏航速率指令
+	const bool manual_attitude_mode =
+		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_MANUAL)
+		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_STAB)
+		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_ACRO)
+		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_ALTCTL)
+		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_POSCTL);
 
-	if (manual.sticks_moving) {
-		msg.flags |= dronecan::formation::ControlInput::FLAG_STICKS_MOVING;
+	float yaw_cmd = manual_attitude_mode ? rates_sp.yaw : att_sp.yaw_sp_move_rate;
+
+	if (!PX4_ISFINITE(yaw_cmd)) {
+		// 异常回退：优先速率设定，仍无效则归零
+		yaw_cmd = rates_sp.yaw;
 	}
+
+	if (!PX4_ISFINITE(yaw_cmd)) {
+		yaw_cmd = 0.0f;
+	}
+
+	// 将主机期望控制姿态（姿态设定、滚转速率前馈、推力设定与偏航指令）封装到消息中
+	dronecan::formation::ControlInput msg;
+	msg.thrust = math::constrain(att_sp.thrust_body[0], 0.0f, 1.0f);
+	msg.pitch = euler_sp.theta();
+	msg.yaw = yaw_cmd;
+	msg.roll_target = euler_sp.phi();
+	msg.roll_rate_target = rates_sp.roll;
+	msg.flags = dronecan::formation::ControlInput::FLAG_VALID;
 
 	(void)_publisher.broadcast(msg);
 }

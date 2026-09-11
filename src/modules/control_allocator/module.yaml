@@ -596,6 +596,22 @@ parameters:
                 1: Remove first failed motor from effectiveness
             default: 0
 
+        # Formation
+        CA_R2P_K:
+            description:
+                short: Roll-to-pitch mixing gain (formation follower)
+                long: |
+                    Mixing gain from roll torque into the pitch torque channel
+                    for formation followers (wingtip hinge coupling compensation):
+                    pitch_torque += roll_torque * CA_R2P_K * side_sign
+                    where the sign differs between left (+1) and right (-1) followers.
+            type: float
+            decimal: 2
+            increment: 0.05
+            min: -1.0
+            max: 1.0
+            default: 0.0
+
 # Mixer
 mixer:
     actuator_types:
@@ -658,7 +674,7 @@ mixer:
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # spoiler
             3: # Elevator
-              - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0.0  } # roll
+              - { 'hidden': True, 'default': 0.0 } # roll
               - { 'min': 0.0, 'max': 1.0, 'default': 1.0 } # pitch
               - { 'hidden': True, 'default': 0.0 } # yaw
               - { 'hidden': False, 'min': -1.0, 'max': 1.0, 'default': 0} # flap

@@ -73,6 +73,11 @@ ControlAllocator::ControlAllocator() :
 		_param_handles.slew_rate_servos[i] = param_find(buffer);
 	}
 
+	// Formation follower custom control parameters (defined in uavcan_params.c)
+	_param_form_follower_en_h = param_find("FORM_FOLLOWER_EN");
+	_param_form_position_h = param_find("FORM_POSITION");
+	_param_form_yaw_k_h = param_find("FORM_YAW_K");
+
 	parameters_updated();
 }
 
@@ -116,6 +121,29 @@ ControlAllocator::parameters_updated()
 		param_get(_param_handles.slew_rate_servos[i], &_params.slew_rate_servos[i]);
 		_has_slew_rate |= _params.slew_rate_servos[i] > FLT_EPSILON;
 	}
+
+	// Formation follower custom control parameters (defined in uavcan_params.c)
+	int32_t follower_en = 0;
+	int32_t formation_position = 0;
+
+	if (_param_form_follower_en_h != PARAM_INVALID) {
+		param_get(_param_form_follower_en_h, &follower_en);
+	}
+
+	if (_param_form_position_h != PARAM_INVALID) {
+		param_get(_param_form_position_h, &formation_position);
+	}
+
+	if (_param_form_yaw_k_h != PARAM_INVALID) {
+		param_get(_param_form_yaw_k_h, &_yaw_throttle_gain);
+	}
+
+	_is_follower = (follower_en != 0);
+
+	// side_sign: LEFT = +1, RIGHT = -1, CENTER = 0 (no hinge correction)
+	_side_sign = (formation_position == 1) ? 1.f : ((formation_position == 2) ? -1.f : 0.f);
+
+	_roll_to_pitch_mix = _param_ca_r2p_k.get();
 
 	// Allocation method & effectiveness source
 	// Do this first: in case a new method is loaded, it will be configured below
@@ -403,12 +431,22 @@ ControlAllocator::Run()
 
 		// Set control setpoint vector(s)
 		matrix::Vector<float, NUM_AXES> c[ActuatorEffectiveness::MAX_NUM_MATRICES];
-		c[0](0) = _torque_sp(0);
-		c[0](1) = _torque_sp(1);
-		c[0](2) = _torque_sp(2);
-		c[0](3) = _thrust_sp(0);
-		c[0](4) = _thrust_sp(1);
-		c[0](5) = _thrust_sp(2);
+		c[0](0) = _torque_sp(0); // τx 滚转力矩
+		c[0](1) = _torque_sp(1); // τy 俯仰力矩 _roll_to_pitch_mix\CA_R2P_K
+		c[0](2) = _torque_sp(2); // τz 偏航力矩
+		c[0](3) = _thrust_sp(0); // Tx 前向推力 _yaw_throttle_gain\FORM_YAW_K
+		c[0](4) = _thrust_sp(1); // Ty
+		c[0](5) = _thrust_sp(2); // Tz
+
+		// 从机编队定制（仅从机生效）：
+		// 1) 翼尖铰链耦合补偿：把部分滚转力矩引入俯仰通道，左右从机符号相反
+		// 2) 转弯外侧增推：按偏航力矩设定单侧截断叠加推力（只增不减）
+		if (_is_follower) {
+			// 滚转补偿
+			c[0](1) += c[0](0) * _roll_to_pitch_mix * _side_sign;
+			// 偏航推力补偿
+			c[0](3) = math::constrain(c[0](3) + math::max(_side_sign * c[0](2), 0.f) * _yaw_throttle_gain, 0.f, 1.f);
+		}
 
 		if (_num_control_allocation > 1) {
 			if (_vehicle_torque_setpoint1_sub.copy(&vehicle_torque_setpoint)) {

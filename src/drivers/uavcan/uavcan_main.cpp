@@ -512,10 +512,8 @@ UavcanNode::init(uavcan::NodeID node_id, UAVCAN_DRIVER::BusEvent &bus_events)
 	// even if the formation modules are not initialized yet
 	param_find("FORM_FOLLOWER_EN");
 	param_find("FORM_POSITION");
-	param_find("FORM_R2P_GAIN");
+	param_find("FORM_HINGE_K");
 	param_find("FORM_YAW_K");
-	param_find("FORM_PITCH_SYNC");
-	param_find("FORM_YAW_SYNC");
 
 	int ret;
 

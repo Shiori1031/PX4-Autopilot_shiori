@@ -37,16 +37,16 @@
 #include <dronecan/formation/ControlInput.hpp>
 
 #include <uORB/Subscription.hpp>
-#include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
-#include <uORB/topics/vehicle_attitude.h>
-#include <uORB/topics/vehicle_angular_velocity.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
+#include <uORB/topics/vehicle_rates_setpoint.h>
 
 /**
  * @brief 编队控制输入发送器
  *
- * 直接订阅 manual_control_setpoint，将主机遥控器四个归一化输入
- * （油门/偏航/滚转/俯仰）封装为自定义 DroneCAN 消息广播给从机。
+ * 订阅主机的姿态设定（vehicle_attitude_setpoint）与速率设定（vehicle_rates_setpoint），
+ * 将主机期望控制姿态（姿态设定角、滚转速率前馈、推力设定、偏航指令）
+ * 封装为自定义 DroneCAN 消息广播给从机。
  */
 class FormationRatesSender
 {
@@ -69,8 +69,7 @@ private:
 	uavcan::Publisher<dronecan::formation::ControlInput> _publisher;
 	uavcan::TimerEventForwarder<TimerCbBinder> _timer;
 
-	uORB::Subscription _manual_sub{ORB_ID(manual_control_setpoint)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
-	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
-	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
+	uORB::Subscription _vehicle_attitude_setpoint_sub{ORB_ID(vehicle_attitude_setpoint)};
+	uORB::Subscription _vehicle_rates_setpoint_sub{ORB_ID(vehicle_rates_setpoint)};
 };

@@ -551,26 +551,27 @@ PARAM_DEFINE_INT32(FORM_FOLLOWER_EN, 0);
 PARAM_DEFINE_INT32(FORM_POSITION, 0);
 
 /**
- * Roll to pitch mapping gain
+ * Hinge correction feedforward gain
  *
- * Converts master aircraft roll input to follower pitch rate command.
- * Physical meaning: master roll input (normalized) → follower pitch rate (rad/s).
+ * Feedforward gain of the wingtip hinge coupling compensation on the follower
+ * pitch channel: pitch += side_sign * FORM_HINGE_K * (master roll rate setpoint).
  *
- * Larger values = stronger "whole-plane-as-aileron" effect.
+ * The unit is effectively time: [s] * [rad/s] = [rad].
  *
- * @unit rad/s
- * @min 0.5
+ * @unit s
+ * @min 0.0
  * @max 5.0
- * @decimal 2
- * @increment 0.1
+ * @decimal 3
+ * @increment 0.05
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_R2P_GAIN, 2.0f);
+PARAM_DEFINE_FLOAT(FORM_HINGE_K, 1.0f);
 
 /**
  * Maximum follower roll attitude setpoint magnitude
  *
- * Roll stick command is scaled to this maximum absolute attitude.
+ * The follower's roll attitude setpoint (from the master intent) is limited
+ * to this maximum absolute value.
  *
  * @unit rad
  * @min 0.1
@@ -584,7 +585,8 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 0.52f);
 /**
  * Maximum follower pitch attitude setpoint magnitude
  *
- * Pitch stick command is scaled to this maximum absolute attitude.
+ * The follower's pitch attitude setpoint (master pitch + hinge correction)
+ * is limited to this maximum absolute value.
  *
  * @unit rad
  * @min 0.1
@@ -596,240 +598,20 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 0.52f);
 PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
 
 /**
- * Roll self-level threshold
+ * Yaw thrust boost coefficient (follower, Control Allocator)
  *
- * When the follower's absolute roll angle exceeds this threshold, a
- * counter-roll correction is gradually added to drive the aircraft back
- * toward level flight.
+ * Additional thrust applied by the Control Allocator to the outer follower
+ * during turns, proportional to the follower's yaw torque setpoint:
+ * thrust_body[0] += max(side_sign * yaw_torque, 0) * FORM_YAW_K
  *
- * @unit rad
- * @min 0.0
- * @max 1.57
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_RLEV_THR, 0.2618f);
-
-/**
- * Roll self-level gain
- *
- * Gain for the counter-roll correction applied when the follower roll
- * angle exceeds FORM_RLEV_THR.
+ * Only the outer follower of the turn gets the boost (single-sided).
  *
  * @unit norm
  * @min 0.0
  * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_RLEV_K, 1.0f);
-
-/**
- * Relative roll attitude feedforward gain
- *
- * Feedforward gain applied to the leader roll attitude in the
- * follower's auxiliary attitude-correction branch.
- *
- * @unit norm
- * @min 0.0
- * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_ROLL_FF, 0.5f);
-
-/**
- * Relative roll attitude proportional gain
- *
- * @unit norm
- * @min 0.0
- * @max 10.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_ROLL_KP, 2.0f);
-
-/**
- * Relative roll rate-difference damping gain
- *
- * Scales the roll-rate difference term before it is converted into an
- * auxiliary attitude correction.
- *
- * @unit norm
- * @min 0.0
- * @max 10.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_ROLL_KD, 0.0f);
-
-/**
- * Relative pitch attitude feedforward gain
- *
- * Feedforward gain applied to the leader pitch attitude in the
- * follower's auxiliary attitude-correction branch.
- *
- * @unit norm
- * @min 0.0
- * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PITCH_FF, 0.5f);
-
-/**
- * Relative pitch attitude proportional gain
- *
- * @unit norm
- * @min 0.0
- * @max 10.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PITCH_KP, 2.0f);
-
-/**
- * Relative pitch rate-difference damping gain
- *
- * Scales the pitch-rate difference term before it is converted into an
- * auxiliary attitude correction.
- *
- * @unit norm
- * @min 0.0
- * @max 10.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PITCH_KD, 0.0f);
-
-/**
- * Reserved yaw auxiliary feedforward gain
- *
- * Reserved for future dedicated yaw auxiliary control tuning.
- * The current attitude-injection implementation uses simple yaw following.
- *
- * @unit norm
- * @min 0.0
- * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_FF, 0.5f);
-
-/**
- * Reserved yaw auxiliary proportional gain
- *
- * Reserved for future dedicated yaw auxiliary control tuning.
- *
- * @unit norm
- * @min 0.0
- * @max 10.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_KP, 2.0f);
-
-/**
- * Reserved yaw auxiliary damping gain
- *
- * Reserved for future dedicated yaw auxiliary control tuning.
- *
- * @unit norm
- * @min 0.0
- * @max 10.0
- * @decimal 2
- * @increment 0.1
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_KD, 0.0f);
-
-/**
- * Maximum follower roll rate setpoint
- *
- * @unit rad/s
- * @min 0.1
- * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_ROLL_RMAX, 1.22f);
-
-/**
- * Maximum follower pitch rate setpoint
- *
- * @unit rad/s
- * @min 0.1
- * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PTCH_RMAX, 1.05f);
-
-/**
- * Maximum follower yaw rate setpoint
- *
- * @unit rad/s
- * @min 0.1
- * @max 5.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_RMAX, 0.87f);
-
-/**
- * Yaw throttle boost coefficient
- *
- * Additional throttle applied to the outer follower during yaw maneuvers.
- * Positive yaw boosts the left follower, negative yaw boosts the right follower.
- *
- * @unit norm
- * @min 0.0
- * @max 1.0
- * @decimal 2
+ * @decimal 3
  * @increment 0.05
  * @group Formation Control
  */
 PARAM_DEFINE_FLOAT(FORM_YAW_K, 0.3f);
 
-/**
- * Pitch synchronization coefficient
- *
- * How much follower planes should track master pitch input.
- * 0.0 = no sync, 1.0 = full sync.
- *
- * @unit norm
- * @min 0.0
- * @max 1.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_PITCH_SYNC, 0.1f);
-
-/**
- * Yaw synchronization coefficient
- *
- * How much follower planes should track master yaw input.
- * 0.0 = no sync, 1.0 = full sync.
- *
- * @unit norm
- * @min 0.0
- * @max 1.0
- * @decimal 2
- * @increment 0.05
- * @group Formation Control
- */
-PARAM_DEFINE_FLOAT(FORM_YAW_SYNC, 1.0f);
