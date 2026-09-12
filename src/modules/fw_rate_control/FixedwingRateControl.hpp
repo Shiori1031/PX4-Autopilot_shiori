@@ -33,6 +33,8 @@
 
 #pragma once
 
+#include "LADRC1.hpp"
+
 #include <lib/rate_control/rate_control.hpp>
 #include <lib/rate_control/gain_compression.hpp>
 
@@ -215,10 +217,20 @@ private:
 		(ParamFloat<px4::params::TRIM_ROLL>) _param_trim_roll,
 		(ParamFloat<px4::params::TRIM_YAW>) _param_trim_yaw,
 
-		(ParamInt<px4::params::FW_SPOILERS_MAN>) _param_fw_spoilers_man
+		(ParamInt<px4::params::FW_SPOILERS_MAN>) _param_fw_spoilers_man,
+
+		(ParamInt<px4::params::FW_ADRC_EN>) _param_fw_adrc_en,
+		(ParamFloat<px4::params::FW_ADRC_B0_R>) _param_fw_adrc_b0_r,
+		(ParamFloat<px4::params::FW_ADRC_B0_P>) _param_fw_adrc_b0_p,
+		(ParamFloat<px4::params::FW_ADRC_WC_R>) _param_fw_adrc_wc_r,
+		(ParamFloat<px4::params::FW_ADRC_WC_P>) _param_fw_adrc_wc_p,
+		(ParamFloat<px4::params::FW_ADRC_WO_R>) _param_fw_adrc_wo_r,
+		(ParamFloat<px4::params::FW_ADRC_WO_P>) _param_fw_adrc_wo_p
 	)
 
 	RateControl _rate_control; ///< class for rate control calculations
+	LADRC1 _ladrc_roll;        ///< LADRC1 内环 — 滚转轴 (FW_ADRC_EN=1 时替换 PID)
+	LADRC1 _ladrc_pitch;       ///< LADRC1 内环 — 俯仰轴 (FW_ADRC_EN=1 时替换 PID)
 	GainCompression3d _gain_compression{this};
 
 	void updateActuatorControlsStatus(float dt);

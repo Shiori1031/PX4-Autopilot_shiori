@@ -81,11 +81,15 @@ FixedwingRateControl::parameters_update()
 	const Vector3f rate_p = Vector3f(_param_fw_rr_p.get(), _param_fw_pr_p.get(), _param_fw_yr_p.get());
 	const Vector3f rate_i = Vector3f(_param_fw_rr_i.get(), _param_fw_pr_i.get(), _param_fw_yr_i.get());
 	const Vector3f rate_d = Vector3f(_param_fw_rr_d.get(), _param_fw_pr_d.get(), _param_fw_yr_d.get());
-
+	// 三轴PID设置
 	_rate_control.setPidGains(rate_p, rate_i, rate_d);
 
 	_rate_control.setIntegratorLimit(
 		Vector3f(_param_fw_rr_imax.get(), _param_fw_pr_imax.get(), _param_fw_yr_imax.get()));
+
+	// LADRC 内环参数 (仅滚转/俯仰; 偏航保持 PID; TD 带宽固定于 LADRC1 类内)
+	_ladrc_roll.setGains(_param_fw_adrc_b0_r.get(), _param_fw_adrc_wo_r.get(), _param_fw_adrc_wc_r.get());
+	_ladrc_pitch.setGains(_param_fw_adrc_b0_p.get(), _param_fw_adrc_wo_p.get(), _param_fw_adrc_wc_p.get());
 
 	if (_handle_param_vt_fw_difthr_en != PARAM_INVALID) {
 		param_get(_handle_param_vt_fw_difthr_en, &_param_vt_fw_difthr_en);
@@ -303,6 +307,8 @@ void FixedwingRateControl::Run()
 			/* reset integrals where needed */
 			if (_rates_sp.reset_integral) {
 				_rate_control.resetIntegral();
+				_ladrc_roll.reset();
+				_ladrc_pitch.reset();
 			}
 
 			// Reset integrators if the aircraft is on ground or not in a state where the fw attitude controller is run
@@ -310,6 +316,8 @@ void FixedwingRateControl::Run()
 
 				_gain_compression.reset();
 				_rate_control.resetIntegral();
+				_ladrc_roll.reset();
+				_ladrc_pitch.reset();
 			}
 
 			// 控制分配反馈处理（抗饱和）Update saturation status from control allocation feedback
@@ -389,7 +397,18 @@ void FixedwingRateControl::Run()
 
 				// Run attitude RATE controllers which need the desired attitudes from above, add trim.
 // PID控制器核心调用		输出：期望的角加速度; 当前角速度反馈rates，角速度设定值body_rates_setpoint，角加速度angular_accel，时间间隔dt，是否着陆_landed
-				const Vector3f angular_acceleration_setpoint = _rate_control.update(rates, body_rates_setpoint, angular_accel, dt, _landed);
+				Vector3f angular_acceleration_setpoint = _rate_control.update(rates, body_rates_setpoint, angular_accel, dt, _landed);
+
+				// LADRC 内环 (仅滚转/俯仰轴): FW_ADRC_EN=1 时替换 PID 输出; =0 时仅"影子"运行, 保持 ESO/TD 状态随时可切换
+				if (!_vehicle_status.is_vtol_tailsitter) {
+					const float u_ladrc_roll  = _ladrc_roll.update(rates(0), body_rates_setpoint(0), dt, _landed);
+					const float u_ladrc_pitch = _ladrc_pitch.update(rates(1), body_rates_setpoint(1), dt, _landed);
+
+					if (_param_fw_adrc_en.get() != 0) {
+						angular_acceleration_setpoint(0) = u_ladrc_roll;
+						angular_acceleration_setpoint(1) = u_ladrc_pitch;
+					}
+				}
 
 				Vector3f control_u = _gain_compression.getGains().emult(angular_acceleration_setpoint * _airspeed_scaling * _airspeed_scaling);
 
@@ -405,8 +424,17 @@ void FixedwingRateControl::Run()
 				if (control_u.isAllFinite()) {
 					matrix::constrain(control_u + trim, -1.f, 1.f).copyTo(_vehicle_torque_setpoint.xyz);
 
+					// LADRC 反饱和: 写回"实际施加"的等效控制量 (总力矩指令扣除 trim 后按空速缩放折算)
+					if (!_vehicle_status.is_vtol_tailsitter) {
+						const float airspeed_scaling_sq = _airspeed_scaling * _airspeed_scaling;
+						_ladrc_roll.setAppliedControl((_vehicle_torque_setpoint.xyz[0] - trim(0)) / airspeed_scaling_sq);
+						_ladrc_pitch.setAppliedControl((_vehicle_torque_setpoint.xyz[1] - trim(1)) / airspeed_scaling_sq);
+					}
+
 				} else {
 					_rate_control.resetIntegral();
+					_ladrc_roll.reset();
+					_ladrc_pitch.reset();
 					trim.copyTo(_vehicle_torque_setpoint.xyz);
 				}
 
@@ -440,6 +468,13 @@ void FixedwingRateControl::Run()
 			// publish rate controller status
 			rate_ctrl_status_s rate_ctrl_status{};
 			_rate_control.getRateControlStatus(rate_ctrl_status);
+
+			if (_param_fw_adrc_en.get() != 0) {
+				// ADRC 模式: 滚转/俯仰积分字段改填 LADRC 扰动估计 z2 (调试日志用), 偏航仍为 PID 积分
+				rate_ctrl_status.rollspeed_integ = _ladrc_roll.getDisturbanceEstimate();
+				rate_ctrl_status.pitchspeed_integ = _ladrc_pitch.getDisturbanceEstimate();
+			}
+
 			rate_ctrl_status.timestamp = hrt_absolute_time();
 
 			_rate_ctrl_status_pub.publish(rate_ctrl_status);
@@ -448,6 +483,8 @@ void FixedwingRateControl::Run()
 			// full manual 完全手动模式处理
 			_gain_compression.reset();
 			_rate_control.resetIntegral();
+			_ladrc_roll.reset();
+			_ladrc_pitch.reset();
 		}
 
 		// Add feed-forward from roll control output to yaw control output

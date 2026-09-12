@@ -31,6 +31,7 @@
 | 分配器定制 | `src/modules/control_allocator/ControlAllocator.{hpp,cpp}` | 从机执行级补偿：滚转→俯仰力矩混控、偏航→外侧机增推 |
 | 参数配置 | `src/drivers/uavcan/uavcan_params.c`、`src/modules/control_allocator/module.yaml` | 定义编队参数（`FORM_*`）与分配器混控增益（`CA_R2P_K`） |
 | 启动接入 | `src/drivers/uavcan/uavcan_main.cpp`、`src/drivers/uavcan/sensors/sensor_bridge.cpp` | 根据参数和板级开关自动初始化发送器/接收器 |
+| 速率内环定制（可选） | `src/modules/fw_rate_control/LADRC1.{hpp,cpp}`、`FixedwingRateControl.cpp`、`fw_rate_control_params.c` | `FW_ADRC_EN=1` 时滚转/俯仰速率环由 PID 切换为一阶 LADRC（详见 5.4 与 6.3 节） |
 | 板级配置 | `boards/cuav/7-nano/default.px4board` | 开启 `CONFIG_UAVCAN_FORMATION_RATES_SENDER` 与 `CONFIG_UAVCAN_SENSOR_FORMATION_RATES` |
 
 ## 3. 传输格式
@@ -214,7 +215,48 @@ FormationRatesBridge
 
 注意：当前 `fw_att_control` 在 attitude 模式下**只消费 `q_d` 的 roll/pitch 分量**，从机偏航速率实际由协调转弯控制器按滚转设定生成（`r_sp ≈ tan(φ)·cos(θ)·g/V`），不读取 `yaw_sp_move_rate`。因此从机实际转弯由滚转主导、与主机同源；`yaw_sp_move_rate` 写入姿态设定属于预留通道，待后续为固定翼偏航前馈打补丁后才能生效。
 
+速率内环可选启用 LADRC（`FW_ADRC_EN=1`，仅替换滚转/俯仰，见 5.4 节）；偏航与其余链路不受影响。
+
 Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现没有额外的编队私有超时参数。
+
+### 5.4 速率内环 LADRC（可选）
+
+`FW_ADRC_EN=1` 时，`FixedwingRateControl` 的**滚转/俯仰速率内环由 PID 切换为一阶线性自抗扰控制（LADRC1）**，偏航轴保持 PID，原 PID 代码完整保留（置 0 即回退）。速率设定值随姿态外环/空速时变，因此控制器含 TD 指令平滑与导数前馈；对链翼构型，翼尖铰链耦合载荷计入"总扰动"，由 ESO 估计并实时抵消，无需显式建模。关联仿真：`docs/reference/LADRC1.m`。
+
+```text
+被控对象 (每个轴, 相对阶 1):   ṗ = f + b0·u
+    f 为总扰动 (气动非线性、轴间耦合、铰链载荷、阵风等); u 为控制量 (域与 PID 输出相同)
+
+① TD (跟踪微分器, 常开):      ṙ* = λ·(r − r*), 输出 r* 与 ṙ*
+② ESO (2 阶扩张状态观测器):   e  = z1 − y
+                              ż1 = z2 − β1·e + b0·u_prev
+                              ż2 = −β2·e        (z1 → 角速率估计, z2 → 总扰动估计 f)
+③ SEF + ④ 扰动补偿:           u = (ωc·(r* − z1) + ṙ* − z2) / b0
+
+带宽参数化 (Gao, ACC 2003):  β1 = 2ωo, β2 = ωo², kp = ωc;  闭环等价于极点 −ωc 的一阶惯性环节。
+```
+
+信号流（下游与 5.3 节一致，仅替换滚转/俯仰通道）：
+
+```text
+vehicle_rates_setpoint (rad/s) ─┐
+                                ▼
+        LADRC1 (roll / pitch) → 替换 angular_acceleration_setpoint(0/1)
+                                ▼
+        ×空速缩放² → +trim → 限幅 → ControlAllocator → 舵面
+        偏航轴: PID 原样
+
+限幅后写回: u_prev = (力矩指令 − trim) / airspeed_scaling²   (ESO 使用实际施加值 → 反饱和)
+```
+
+关键工程点：
+
+- **影子运行**：`FW_ADRC_EN=0` 时 LADRC 仍每拍计算（不接管输出），保证飞行中随时切换无跳变；
+- **反饱和**：ESO 模型输入使用限幅后的"实际施加值"（trim 项由 z2 自适应吸收）；
+- **复位**：`rates_sp.reset_integral`、落地、非固定翼状态、控制量非有限时，ESO/TD 热启动复位（避免初始瞬态）；
+- **日志**：ADRC 模式下 `rate_ctrl_status.rollspeed_integ / pitchspeed_integ` 记录 z2 扰动估计（偏航字段仍为 PID 积分）；
+- tailsitter 场景自动回退 PID；偏航轴、姿态外环、前馈/trim/空速缩放逻辑均未改动；
+- 状态：2026-09-12 编译验证通过（cuav_7-nano），未实飞。
 
 ## 6. 实际生效参数
 
@@ -231,7 +273,6 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 ### 6.2 从机参数（左/右机）
 
 基础通信参数：
-
 | 参数 | 说明 |
 | ---- | ---- |
 | `UAVCAN_ENABLE` | UAVCAN 使能，通常设为 `3` |
@@ -241,7 +282,6 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `FORM_POSITION` | 左机设 `1`，右机设 `2` |
 
 编队控制参数（`Formation Control` 组）：
-
 | 参数 | 默认 | 说明 |
 | ---- | ---- | ---- |
 | `FORM_HINGE_K` | 1.0 | 铰链修正前馈增益（单位：s）：`pitch += side_sign * FORM_HINGE_K * 主机期望滚转速率` |
@@ -250,18 +290,51 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 | `FORM_YAW_K` | 0.3 | 分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K` |
 
 分配器参数（`Control Allocation` 组，仅从机生效）：
-
 | 参数 | 默认 | 说明 |
 | ---- | ---- | ---- |
 | `CA_R2P_K` | 0.0 | 滚转→俯仰力矩混控增益：`τy += τx * CA_R2P_K * side_sign`（左右符号自动镜像） |
 
 其他：
-
 | 参数 | 说明 |
 | ---- | ---- |
 | `COM_OF_LOSS_T` | Offboard 丢失超时，使用 PX4 原生机制 |
 
-### 6.3 参数变更说明（相对旧版）
+### 6.3 速率内环参数（`FW ADRC` 组，可选）
+
+`FW_ADRC_EN=1` 时启用（结构与代码见 5.4 节）：
+
+| 参数 | 默认值 | 单位 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `FW_ADRC_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管滚转/俯仰 |
+
+| `FW_ADRC_B0_R` | 25.0 | rad/s² | 滚转模型增益 b0 |
+| `FW_ADRC_WC_R` | 10.0 | rad/s | 滚转控制器带宽 ωc（闭环极点 −ωc） |
+| `FW_ADRC_WO_R` | 40.0 | rad/s | 滚转观测器带宽 ωo（建议 3~5×ωc） |
+
+| `FW_ADRC_B0_P` | 20.0 | rad/s² | 俯仰模型增益 b0 |
+| `FW_ADRC_WC_P` | 8.0 | rad/s | 俯仰控制器带宽 ωc |
+| `FW_ADRC_WO_P` | 32.0 | rad/s | 俯仰观测器带宽 ωo |
+
+TD 带宽固定 40 rad/s（`LADRC1` 类内 `kTdLambda` 常量）：TD 常开、不参数化；如需调整，修改常量后重新编译。
+
+b0 定义：单位归一化力矩指令（±1）在配平空速下产生的角加速度：
+
+```text
+b0_R = q̄·S·b·Clδa/Ixx × δa_max ≈ 25 rad/s²   (滚转: 力臂=翼展 b, 惯量=Ixx, 效能=副翼)
+b0_P = q̄·S·c·Cmδe/Iyy × δe_max ≈ 20 rad/s²   (俯仰: 力臂=弦长 c, 惯量=Iyy, 效能=升降舵)
+```
+
+滚转/俯仰是两套物理通道（力臂、惯量、舵面效能均不同），所以 b0 分轴给定、数值不同；偏航未换（仍 PID），没有 b0。默认值按 VLM 气动数据 + "力矩指令 ±1 ≈ 全舵面行程（约 ±25°）"估算，实机请核对舵面行程后微调。
+
+**调参**顺序（重要性排序）：
+
+1. b0: b0 *偏小* → 算出的舵量偏大 → 等效增益高 → 容易*振荡*；b0 *偏大* → 响应*迟钝*。
+2. ωc（控制器带宽）：*振荡就降、跟踪慢就升*；需明显快于姿态外环带宽。
+3. ωo（观测器带宽）：保持 3~5×ωc；过低则扰动估计滞后，过高会放大测量噪声。
+
+启用建议：先以默认 `FW_ADRC_EN=0` 验证基础行为，再地面站设为 1、小幅滚转/俯仰打杆观察（出现振荡降 `WC` 或核对 `B0`），通过后再进行常规科目与编队联调；闭环验证见 6.6 节。
+
+### 6.4 参数变更说明（相对旧版）
 
 本版改造后，以下旧参数已**从固件中删除**（QGC 中不再出现，历史保存值失效）：
 
@@ -276,7 +349,7 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 
 ⚠️ 升级固件后请检查 `CA_SV_CSx_TRQ_R`（升降舵滚转力矩系数）：若之前在 QGC 中设置过非零值，需清零，避免与 `CA_R2P_K` 双重叠加。
 
-### 6.4 推荐配置示例
+### 6.5 推荐配置示例
 
 主机：
 
@@ -305,6 +378,14 @@ param set FORM_PTCH_AMAX 0.35
 param set FORM_YAW_K 0.3
 param set CA_R2P_K 0.0
 param set COM_OF_LOSS_T 1.0
+
+param set FW_ADRC_EN 1
+param set FW_ADRC_B0_R 25.0
+param set FW_ADRC_WC_R 10.0
+param set FW_ADRC_WO_R 40.0
+param set FW_ADRC_B0_P 20.0
+param set FW_ADRC_WC_P 8.0
+param set FW_ADRC_WO_P 32.0
 param save
 reboot
 ```
@@ -324,6 +405,15 @@ param set FORM_PTCH_AMAX 0.35
 param set FORM_YAW_K 0.3
 param set CA_R2P_K 0.0
 param set COM_OF_LOSS_T 1.0
+
+param set FW_ADRC_EN 1
+param set FW_ADRC_B0_R 25.0
+param set FW_ADRC_WC_R 10.0
+param set FW_ADRC_WO_R 40.0
+param set FW_ADRC_B0_P 20.0
+param set FW_ADRC_WC_P 8.0
+param set FW_ADRC_WO_P 32.0
+
 param save
 reboot
 ```
@@ -333,8 +423,9 @@ reboot
 - `FORM_HINGE_K` 初始 `1.0`（等效 1 s 几何时间尺度），按试飞中铰链过渡过程的从机俯仰跟随效果调整；
 - 从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
 - 主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。
+- 速率内环 LADRC：从机示例已按 `FW_ADRC_EN=1` 配置（左右从机一起开、保持对称），主机暂为 `0`（保留 PID 作为基准，从机验证通过后可再置 1）；`B0 / WC / WO` 为按仿真机型估算的初值，实机请按各自舵面行程核对（见 6.3 节）。
 
-### 6.5 传输验证方法
+### 6.6 传输验证方法
 
 可以用 PX4 shell 里的 `listener` 配合 `uavcan status` 做链路验证。
 需要注意：`listener` 观察的是 PX4 内部 uORB 主题，不是直接抓原始 CAN 帧；因此它更适合验证"消息已经被正确接收并转换为控制量"。
@@ -376,6 +467,15 @@ listener vehicle_rates_setpoint -r 5 -n 20
 ```
 
 此时应能看到 `fw_att_control` 根据 `vehicle_attitude_setpoint` 继续生成的 `roll/pitch/yaw/thrust_body[0]` 更新（偏航通道由协调转弯按滚转生成）。
+
+如已启用速率内环 LADRC（`FW_ADRC_EN=1`），可进一步检查速率跟踪：
+
+```bash
+listener vehicle_angular_velocity -r 5 -n 20
+listener vehicle_rates_setpoint -r 5 -n 20
+```
+
+观察角速率跟随速率设定的相位与幅值；`rate_ctrl_status` 的 `rollspeed_integ / pitchspeed_integ` 此时为 LADRC 扰动估计 z2（偏航字段仍为 PID 积分），可用于判断阻尼与耦合载荷的量级。
 
 如果 `listener vehicle_attitude_setpoint` 没有更新，优先检查：
 - 主机是否已开启 `UAVCAN_PUB_FORM=1`

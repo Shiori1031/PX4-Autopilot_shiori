@@ -198,6 +198,107 @@ PARAM_DEFINE_FLOAT(FW_YR_I, 0.1f);
 PARAM_DEFINE_FLOAT(FW_YR_IMAX, 0.2f);
 
 /**
+ * Enable LADRC inner rate control (roll & pitch)
+ *
+ * Replaces the PID with a first order Linear ADRC (TD + 2nd order ESO +
+ * P state error feedback + disturbance rejection) on the roll and pitch
+ * body rate axes. The yaw axis always keeps the PID.
+ * 0: PID (default), 1: LADRC.
+ *
+ * @boolean
+ * @group FW ADRC
+ */
+PARAM_DEFINE_INT32(FW_ADRC_EN, 0);
+
+/**
+ * LADRC roll rate model gain b0
+ *
+ * Roll angular acceleration [rad/s^2] produced by one unit of normalized
+ * roll torque command at trim airspeed (inside the controller: u = (u0 - z2)/b0).
+ * Initial estimate from roll control power:
+ * q_bar * S * b * Cl_da / Ixx * (max aileron deflection).
+ *
+ * @min 0.1
+ * @max 100
+ * @decimal 1
+ * @increment 0.5
+ * @group FW ADRC
+ */
+PARAM_DEFINE_FLOAT(FW_ADRC_B0_R, 25.0f);
+
+/**
+ * LADRC pitch rate model gain b0
+ *
+ * Pitch angular acceleration [rad/s^2] produced by one unit of normalized
+ * pitch torque command at trim airspeed.
+ * Initial estimate from pitch control power:
+ * q_bar * S * c * Cm_de / Iyy * (max elevator deflection).
+ *
+ * @min 0.1
+ * @max 100
+ * @decimal 1
+ * @increment 0.5
+ * @group FW ADRC
+ */
+PARAM_DEFINE_FLOAT(FW_ADRC_B0_P, 20.0f);
+
+/**
+ * LADRC roll rate controller bandwidth
+ *
+ * Closed loop behaves as first order with pole at -FW_ADRC_WC_R.
+ *
+ * @unit rad/s
+ * @min 0.1
+ * @max 50
+ * @decimal 1
+ * @increment 0.5
+ * @group FW ADRC
+ */
+PARAM_DEFINE_FLOAT(FW_ADRC_WC_R, 10.0f);
+
+/**
+ * LADRC pitch rate controller bandwidth
+ *
+ * Closed loop behaves as first order with pole at -FW_ADRC_WC_P.
+ *
+ * @unit rad/s
+ * @min 0.1
+ * @max 50
+ * @decimal 1
+ * @increment 0.5
+ * @group FW ADRC
+ */
+PARAM_DEFINE_FLOAT(FW_ADRC_WC_P, 8.0f);
+
+/**
+ * LADRC roll rate observer bandwidth
+ *
+ * Recommended 3 to 5 times the controller bandwidth.
+ *
+ * @unit rad/s
+ * @min 1
+ * @max 200
+ * @decimal 1
+ * @increment 1
+ * @group FW ADRC
+ */
+PARAM_DEFINE_FLOAT(FW_ADRC_WO_R, 40.0f);
+
+/**
+ * LADRC pitch rate observer bandwidth
+ *
+ * Recommended 3 to 5 times the controller bandwidth.
+ *
+ * @unit rad/s
+ * @min 1
+ * @max 200
+ * @decimal 1
+ * @increment 1
+ * @group FW ADRC
+ */
+PARAM_DEFINE_FLOAT(FW_ADRC_WO_P, 32.0f);
+
+/**
  * Roll rate feed forward
  *
  * Direct feed forward from rate setpoint to control surface output.

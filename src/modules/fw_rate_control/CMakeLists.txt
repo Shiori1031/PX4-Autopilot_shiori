@@ -37,6 +37,8 @@ px4_add_module(
 	SRCS
 		FixedwingRateControl.cpp
 		FixedwingRateControl.hpp
+		LADRC1.cpp
+		LADRC1.hpp
 	DEPENDS
 		px4_work_queue
 		RateControl
