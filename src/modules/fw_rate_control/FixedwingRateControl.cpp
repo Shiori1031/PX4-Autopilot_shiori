@@ -87,9 +87,9 @@ FixedwingRateControl::parameters_update()
 	_rate_control.setIntegratorLimit(
 		Vector3f(_param_fw_rr_imax.get(), _param_fw_pr_imax.get(), _param_fw_yr_imax.get()));
 
-	// LADRC 内环参数 (仅滚转/俯仰; 偏航保持 PID; TD 带宽固定于 LADRC1 类内)
-	_ladrc_roll.setGains(_param_fw_adrc_b0_r.get(), _param_fw_adrc_wo_r.get(), _param_fw_adrc_wc_r.get());
-	_ladrc_pitch.setGains(_param_fw_adrc_b0_p.get(), _param_fw_adrc_wo_p.get(), _param_fw_adrc_wc_p.get());
+	// LADRC 内环参数 (仅滚转/俯仰; 偏航保持 PID; TD 带宽与观测器带宽固定于 LADRC1 类内)
+	_ladrc_roll.setGains(_param_fw_adrc_b0_r.get(), _param_fw_adrc_wc_r.get());
+	_ladrc_pitch.setGains(_param_fw_adrc_b0_p.get(), _param_fw_adrc_wc_p.get());
 
 	if (_handle_param_vt_fw_difthr_en != PARAM_INVALID) {
 		param_get(_handle_param_vt_fw_difthr_en, &_param_vt_fw_difthr_en);

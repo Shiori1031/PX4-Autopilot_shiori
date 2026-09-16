@@ -271,34 +271,6 @@ PARAM_DEFINE_FLOAT(FW_ADRC_WC_R, 10.0f);
 PARAM_DEFINE_FLOAT(FW_ADRC_WC_P, 8.0f);
 
 /**
- * LADRC roll rate observer bandwidth
- *
- * Recommended 3 to 5 times the controller bandwidth.
- *
- * @unit rad/s
- * @min 1
- * @max 200
- * @decimal 1
- * @increment 1
- * @group FW ADRC
- */
-PARAM_DEFINE_FLOAT(FW_ADRC_WO_R, 40.0f);
-
-/**
- * LADRC pitch rate observer bandwidth
- *
- * Recommended 3 to 5 times the controller bandwidth.
- *
- * @unit rad/s
- * @min 1
- * @max 200
- * @decimal 1
- * @increment 1
- * @group FW ADRC
- */
-PARAM_DEFINE_FLOAT(FW_ADRC_WO_P, 32.0f);
-
-/**
  * Roll rate feed forward
  *
  * Direct feed forward from rate setpoint to control surface output.

@@ -223,9 +223,7 @@ private:
 		(ParamFloat<px4::params::FW_ADRC_B0_R>) _param_fw_adrc_b0_r,
 		(ParamFloat<px4::params::FW_ADRC_B0_P>) _param_fw_adrc_b0_p,
 		(ParamFloat<px4::params::FW_ADRC_WC_R>) _param_fw_adrc_wc_r,
-		(ParamFloat<px4::params::FW_ADRC_WC_P>) _param_fw_adrc_wc_p,
-		(ParamFloat<px4::params::FW_ADRC_WO_R>) _param_fw_adrc_wo_r,
-		(ParamFloat<px4::params::FW_ADRC_WO_P>) _param_fw_adrc_wo_p
+		(ParamFloat<px4::params::FW_ADRC_WC_P>) _param_fw_adrc_wc_p
 	)
 
 	RateControl _rate_control; ///< class for rate control calculations

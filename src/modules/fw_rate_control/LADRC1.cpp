@@ -42,10 +42,9 @@
 #include <lib/mathlib/mathlib.h>
 #include <px4_platform_common/defines.h>
 
-void LADRC1::setGains(float b0, float wo, float wc)
+void LADRC1::setGains(float b0, float wc)
 {
 	_b0 = math::max(b0, 0.01f);
-	_wo = math::max(wo, 0.1f);
 	_wc = math::max(wc, 0.01f);
 
 	updateGains();
@@ -53,7 +52,8 @@ void LADRC1::setGains(float b0, float wo, float wc)
 
 void LADRC1::updateGains()
 {
-	// Gao 2003 带宽参数化 (一阶对象)
+	// Gao 2003 带宽参数化 (一阶对象); 观测器带宽固定为 4×控制器带宽
+	_wo    = kWoRatio * _wc;
 	_beta1 = 2.f * _wo;
 	_beta2 = _wo * _wo;
 	_kp    = _wc;

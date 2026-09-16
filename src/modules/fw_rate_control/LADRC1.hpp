@@ -45,7 +45,7 @@
  *                        ż2 = −β2·e,        e = z1 − y
  *   SEF + 扰动补偿:      u = (ωc·(r* − z1) + ṙ* − z2) / b0
  *
- * 带宽参数化 (Gao, ACC 2003):  β1 = 2ωo, β2 = ωo², kp = ωc
+ * 带宽参数化 (Gao, ACC 2003):  ωo = 4×ωc (固定), β1 = 2ωo, β2 = ωo², kp = ωc
  *
  * 工程要点:
  *  - ESO 使用"实际施加"的控制量 (下游限幅/叠加 trim 后由 setAppliedControl() 写回) → 抗积分饱和
@@ -65,10 +65,10 @@ public:
 	/**
 	 * 设置增益 (带宽参数化)
 	 * @param b0 控制增益 (单位控制量 → 被控量加速度)
-	 * @param wo 观测器带宽 [rad/s], 建议 3~5×wc
 	 * @param wc 控制器带宽 [rad/s] (一阶闭环极点 -wc)
+	 *           (观测器带宽固定取 4×wc, 见 kWoRatio; Gao 建议 3~5×)
 	 */
-	void setGains(float b0, float wo, float wc);
+	void setGains(float b0, float wc);
 
 	/**
 	 * 一步更新 (TD + ESO + 控制律)
@@ -94,12 +94,13 @@ public:
 
 private:
 	static constexpr float kTdLambda{40.f};  ///< TD 带宽 [rad/s] (固定, ≈4~5×wc, 接近直通; 如需调整改此常量)
+	static constexpr float kWoRatio{4.f};    ///< 观测器带宽 = 4×控制器带宽 (Gao 建议 3~5×, 固定取 4×)
 
 	void updateGains();
 
 	// 增益
 	float _b0{1.f};      ///< 控制增益
-	float _wo{40.f};     ///< 观测器带宽 [rad/s]
+	float _wo{40.f};     ///< 观测器带宽 [rad/s] (= 4×_wc, 由 updateGains() 计算)
 	float _wc{10.f};     ///< 控制器带宽 [rad/s]
 
 	// 带宽参数化增益

@@ -233,7 +233,7 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
                               ż2 = −β2·e        (z1 → 角速率估计, z2 → 总扰动估计 f)
 ③ SEF + ④ 扰动补偿:           u = (ωc·(r* − z1) + ṙ* − z2) / b0
 
-带宽参数化 (Gao, ACC 2003):  β1 = 2ωo, β2 = ωo², kp = ωc;  闭环等价于极点 −ωc 的一阶惯性环节。
+带宽参数化 (Gao, ACC 2003):  β1 = 2ωo, β2 = ωo², kp = ωc（ωo 固定取 4×ωc）;  闭环等价于极点 −ωc 的一阶惯性环节。
 ```
 
 信号流（下游与 5.3 节一致，仅替换滚转/俯仰通道）：
@@ -309,13 +309,16 @@ vehicle_rates_setpoint (rad/s) ─┐
 
 | `FW_ADRC_B0_R` | 25.0 | rad/s² | 滚转模型增益 b0 |
 | `FW_ADRC_WC_R` | 10.0 | rad/s | 滚转控制器带宽 ωc（闭环极点 −ωc） |
-| `FW_ADRC_WO_R` | 40.0 | rad/s | 滚转观测器带宽 ωo（建议 3~5×ωc） |
 
 | `FW_ADRC_B0_P` | 20.0 | rad/s² | 俯仰模型增益 b0 |
 | `FW_ADRC_WC_P` | 8.0 | rad/s | 俯仰控制器带宽 ωc |
-| `FW_ADRC_WO_P` | 32.0 | rad/s | 俯仰观测器带宽 ωo |
 
-TD 带宽固定 40 rad/s（`LADRC1` 类内 `kTdLambda` 常量）：TD 常开、不参数化；如需调整，修改常量后重新编译。
+TD 带宽固定 40 rad/s（`LADRC1` 类内 `kTdLambda` 常量）；观测器带宽固定为 4×ωc（`LADRC1` 类内 `kWoRatio` 常量，Gao 建议 3~5×）：两者均不参数化（带宽参数化的本意即把可调量压缩为 b0 + 一个带宽），如需调整修改常量后重新编译。
+
+**注意参数耦合**：`WC`（ωc）是唯一的“总强度”旋钮，一个参数同时决定
+- 比例增益：kp = ωc；
+- 观测器（扰动估计）速度：ωo = 4×ωc；
+- “隐式积分”强度（*z2* 通道，承担原 PID *积分角色*）：β2 = ωo² = 16×ωc²，与 ωc 平方相关。
 
 b0 定义：单位归一化力矩指令（±1）在配平空速下产生的角加速度：
 
@@ -328,9 +331,9 @@ b0_P = q̄·S·c·Cmδe/Iyy × δe_max ≈ 20 rad/s²   (俯仰: 力臂=弦长 c
 
 **调参**顺序（重要性排序）：
 
-1. b0: b0 *偏小* → 算出的舵量偏大 → 等效增益高 → 容易*振荡*；b0 *偏大* → 响应*迟钝*。
-2. ωc（控制器带宽）：*振荡就降、跟踪慢就升*；需明显快于姿态外环带宽。
-3. ωo（观测器带宽）：保持 3~5×ωc；过低则扰动估计滞后，过高会放大测量噪声。
+1. b0：b0 *偏小* → 算出的舵量偏大 → 等效增益高 → 容易*振荡*；b0 *偏大* → 响应*迟钝*。b0 不准还会折算进等效积分强度（Ki ∝ β2/b0）：b0 偏大时积分被“稀释”，稳态偏差收敛与抗扰变差。
+2. ωc（控制器带宽）：*振荡就降、跟踪慢就升*；需明显快于姿态外环带宽。P、观测速度、隐式积分（∝ωc²）随它一起变——若响应已够快但稳态偏差收敛慢/抗扰不足，说明缺的是积分而非比例，见第 3 条。
+3. 观测器带宽比（一般不动）：ωo 固定为 4×ωc。仅当需要*单独加强/减弱扰动抑制（积分）、又不想改 P 与响应速度时*，修改 `kWoRatio`（保持 Gao 建议区间 3~5）后重新编译：调大 → 扰动估计更快、隐式积分更强，但对速率测量噪声更敏感。
 
 启用建议：先以默认 `FW_ADRC_EN=0` 验证基础行为，再地面站设为 1、小幅滚转/俯仰打杆观察（出现振荡降 `WC` 或核对 `B0`），通过后再进行常规科目与编队联调；闭环验证见 6.6 节。
 
@@ -352,7 +355,6 @@ b0_P = q̄·S·c·Cmδe/Iyy × δe_max ≈ 20 rad/s²   (俯仰: 力臂=弦长 c
 ### 6.5 推荐配置示例
 
 主机：
-
 ```bash
 param set UAVCAN_ENABLE 3
 param set UAVCAN_NODE_ID 1
@@ -364,7 +366,6 @@ reboot
 ```
 
 左机：
-
 ```bash
 param set UAVCAN_ENABLE 3
 param set UAVCAN_NODE_ID 2
@@ -382,16 +383,13 @@ param set COM_OF_LOSS_T 1.0
 param set FW_ADRC_EN 1
 param set FW_ADRC_B0_R 25.0
 param set FW_ADRC_WC_R 10.0
-param set FW_ADRC_WO_R 40.0
 param set FW_ADRC_B0_P 20.0
 param set FW_ADRC_WC_P 8.0
-param set FW_ADRC_WO_P 32.0
 param save
 reboot
 ```
 
 右机：
-
 ```bash
 param set UAVCAN_ENABLE 3
 param set UAVCAN_NODE_ID 3
@@ -409,10 +407,8 @@ param set COM_OF_LOSS_T 1.0
 param set FW_ADRC_EN 1
 param set FW_ADRC_B0_R 25.0
 param set FW_ADRC_WC_R 10.0
-param set FW_ADRC_WO_R 40.0
 param set FW_ADRC_B0_P 20.0
 param set FW_ADRC_WC_P 8.0
-param set FW_ADRC_WO_P 32.0
 
 param save
 reboot
@@ -423,7 +419,7 @@ reboot
 - `FORM_HINGE_K` 初始 `1.0`（等效 1 s 几何时间尺度），按试飞中铰链过渡过程的从机俯仰跟随效果调整；
 - 从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
 - 主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。
-- 速率内环 LADRC：从机示例已按 `FW_ADRC_EN=1` 配置（左右从机一起开、保持对称），主机暂为 `0`（保留 PID 作为基准，从机验证通过后可再置 1）；`B0 / WC / WO` 为按仿真机型估算的初值，实机请按各自舵面行程核对（见 6.3 节）。
+- 速率内环 LADRC：从机示例已按 `FW_ADRC_EN=1` 配置（左右从机一起开、保持对称），主机暂为 `0`（保留 PID 作为基准，从机验证通过后可再置 1）；`B0 / WC` 为按仿真机型估算的初值（ωo 固定 4×ωc，见 6.3 节），实机请按各自舵面行程核对。
 
 ### 6.6 传输验证方法
 
