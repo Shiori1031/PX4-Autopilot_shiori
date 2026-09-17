@@ -198,17 +198,30 @@ PARAM_DEFINE_FLOAT(FW_YR_I, 0.1f);
 PARAM_DEFINE_FLOAT(FW_YR_IMAX, 0.2f);
 
 /**
- * Enable LADRC inner rate control (roll & pitch)
+ * Enable LADRC roll rate inner control
  *
  * Replaces the PID with a first order Linear ADRC (TD + 2nd order ESO +
- * P state error feedback + disturbance rejection) on the roll and pitch
- * body rate axes. The yaw axis always keeps the PID.
+ * P state error feedback + disturbance rejection) on the roll body rate axis.
+ * Pitch is switched separately by FW_ADRC_P_EN, the yaw axis always keeps the PID.
  * 0: PID (default), 1: LADRC.
  *
  * @boolean
  * @group FW ADRC
  */
-PARAM_DEFINE_INT32(FW_ADRC_EN, 0);
+PARAM_DEFINE_INT32(FW_ADRC_R_EN, 0);
+
+/**
+ * Enable LADRC pitch rate inner control
+ *
+ * Replaces the PID with a first order Linear ADRC (TD + 2nd order ESO +
+ * P state error feedback + disturbance rejection) on the pitch body rate axis.
+ * Roll is switched separately by FW_ADRC_R_EN, the yaw axis always keeps the PID.
+ * 0: PID (default), 1: LADRC.
+ *
+ * @boolean
+ * @group FW ADRC
+ */
+PARAM_DEFINE_INT32(FW_ADRC_P_EN, 0);
 
 /**
  * LADRC roll rate model gain b0

@@ -399,13 +399,16 @@ void FixedwingRateControl::Run()
 // PID控制器核心调用		输出：期望的角加速度; 当前角速度反馈rates，角速度设定值body_rates_setpoint，角加速度angular_accel，时间间隔dt，是否着陆_landed
 				Vector3f angular_acceleration_setpoint = _rate_control.update(rates, body_rates_setpoint, angular_accel, dt, _landed);
 
-				// LADRC 内环 (仅滚转/俯仰轴): FW_ADRC_EN=1 时替换 PID 输出; =0 时仅"影子"运行, 保持 ESO/TD 状态随时可切换
+				// LADRC 内环 (仅滚转/俯仰轴): 两轴开关独立, 各自替换 PID 输出; 关闭的轴仅"影子"运行, 保持 ESO/TD 状态随时可切换
 				if (!_vehicle_status.is_vtol_tailsitter) {
 					const float u_ladrc_roll  = _ladrc_roll.update(rates(0), body_rates_setpoint(0), dt, _landed);
 					const float u_ladrc_pitch = _ladrc_pitch.update(rates(1), body_rates_setpoint(1), dt, _landed);
 
-					if (_param_fw_adrc_en.get() != 0) {
+					if (_param_fw_adrc_r_en.get() != 0) {
 						angular_acceleration_setpoint(0) = u_ladrc_roll;
+					}
+
+					if (_param_fw_adrc_p_en.get() != 0) {
 						angular_acceleration_setpoint(1) = u_ladrc_pitch;
 					}
 				}
@@ -469,9 +472,12 @@ void FixedwingRateControl::Run()
 			rate_ctrl_status_s rate_ctrl_status{};
 			_rate_control.getRateControlStatus(rate_ctrl_status);
 
-			if (_param_fw_adrc_en.get() != 0) {
-				// ADRC 模式: 滚转/俯仰积分字段改填 LADRC 扰动估计 z2 (调试日志用), 偏航仍为 PID 积分
+			// 被 LADRC 接管的轴, 其积分字段改填扰动估计 z2 (调试日志用); 未接管轴与偏航仍为 PID 积分
+			if (_param_fw_adrc_r_en.get() != 0) {
 				rate_ctrl_status.rollspeed_integ = _ladrc_roll.getDisturbanceEstimate();
+			}
+
+			if (_param_fw_adrc_p_en.get() != 0) {
 				rate_ctrl_status.pitchspeed_integ = _ladrc_pitch.getDisturbanceEstimate();
 			}
 

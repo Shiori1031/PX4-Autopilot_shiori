@@ -31,7 +31,7 @@
 | 分配器定制 | `src/modules/control_allocator/ControlAllocator.{hpp,cpp}` | 从机执行级补偿：滚转→俯仰力矩混控、偏航→外侧机增推 |
 | 参数配置 | `src/drivers/uavcan/uavcan_params.c`、`src/modules/control_allocator/module.yaml` | 定义编队参数（`FORM_*`）与分配器混控增益（`CA_R2P_K`） |
 | 启动接入 | `src/drivers/uavcan/uavcan_main.cpp`、`src/drivers/uavcan/sensors/sensor_bridge.cpp` | 根据参数和板级开关自动初始化发送器/接收器 |
-| 速率内环定制（可选） | `src/modules/fw_rate_control/LADRC1.{hpp,cpp}`、`FixedwingRateControl.cpp`、`fw_rate_control_params.c` | `FW_ADRC_EN=1` 时滚转/俯仰速率环由 PID 切换为一阶 LADRC（详见 5.4 与 6.3 节） |
+| 速率内环定制（可选） | `src/modules/fw_rate_control/LADRC1.{hpp,cpp}`、`FixedwingRateControl.cpp`、`fw_rate_control_params.c` | `FW_ADRC_R_EN` / `FW_ADRC_P_EN` 分轴开启时，对应轴速率环由 PID 切换为一阶 LADRC（详见 5.4 与 6.3 节） |
 | 板级配置 | `boards/cuav/7-nano/default.px4board` | 开启 `CONFIG_UAVCAN_FORMATION_RATES_SENDER` 与 `CONFIG_UAVCAN_SENSOR_FORMATION_RATES` |
 
 ## 3. 传输格式
@@ -215,13 +215,13 @@ FormationRatesBridge
 
 注意：当前 `fw_att_control` 在 attitude 模式下**只消费 `q_d` 的 roll/pitch 分量**，从机偏航速率实际由协调转弯控制器按滚转设定生成（`r_sp ≈ tan(φ)·cos(θ)·g/V`），不读取 `yaw_sp_move_rate`。因此从机实际转弯由滚转主导、与主机同源；`yaw_sp_move_rate` 写入姿态设定属于预留通道，待后续为固定翼偏航前馈打补丁后才能生效。
 
-速率内环可选启用 LADRC（`FW_ADRC_EN=1`，仅替换滚转/俯仰，见 5.4 节）；偏航与其余链路不受影响。
+速率内环可选启用 LADRC（`FW_ADRC_R_EN` / `FW_ADRC_P_EN` 分轴独立开启，见 5.4 节）；偏航与其余链路不受影响。
 
 Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现没有额外的编队私有超时参数。
 
 ### 5.4 速率内环 LADRC（可选）
 
-`FW_ADRC_EN=1` 时，`FixedwingRateControl` 的**滚转/俯仰速率内环由 PID 切换为一阶线性自抗扰控制（LADRC1）**，偏航轴保持 PID，原 PID 代码完整保留（置 0 即回退）。速率设定值随姿态外环/空速时变，因此控制器含 TD 指令平滑与导数前馈；对链翼构型，翼尖铰链耦合载荷计入"总扰动"，由 ESO 估计并实时抵消，无需显式建模。关联仿真：`docs/reference/LADRC1.m`。
+`FW_ADRC_R_EN=1`（滚转）或 `FW_ADRC_P_EN=1`（俯仰）时，`FixedwingRateControl` 的**对应轴速率内环由 PID 切换为一阶线性自抗扰控制（LADRC1）**，两轴可独立开启，偏航轴保持 PID，原 PID 代码完整保留（置 0 即回退）。速率设定值随姿态外环/空速时变，因此控制器含 TD 指令平滑与导数前馈；对链翼构型，翼尖铰链耦合载荷计入"总扰动"，由 ESO 估计并实时抵消，无需显式建模。关联仿真：`docs/reference/LADRC1.m`。
 
 ```text
 被控对象 (每个轴, 相对阶 1):   ṗ = f + b0·u
@@ -251,10 +251,10 @@ vehicle_rates_setpoint (rad/s) ─┐
 
 关键工程点：
 
-- **影子运行**：`FW_ADRC_EN=0` 时 LADRC 仍每拍计算（不接管输出），保证飞行中随时切换无跳变；
+- **影子运行**：某轴开关为 0 时该轴 LADRC 仍每拍计算（不接管输出），保证飞行中随时切换无跳变；
 - **反饱和**：ESO 模型输入使用限幅后的"实际施加值"（trim 项由 z2 自适应吸收）；
 - **复位**：`rates_sp.reset_integral`、落地、非固定翼状态、控制量非有限时，ESO/TD 热启动复位（避免初始瞬态）；
-- **日志**：ADRC 模式下 `rate_ctrl_status.rollspeed_integ / pitchspeed_integ` 记录 z2 扰动估计（偏航字段仍为 PID 积分）；
+- **日志**：某轴被接管时，`rate_ctrl_status.rollspeed_integ / pitchspeed_integ` 中对应字段记录该轴的 z2 扰动估计（未接管轴与偏航仍为 PID 积分）；
 - tailsitter 场景自动回退 PID；偏航轴、姿态外环、前馈/trim/空速缩放逻辑均未改动；
 - 状态：2026-09-12 编译验证通过（cuav_7-nano），未实飞。
 
@@ -305,7 +305,8 @@ vehicle_rates_setpoint (rad/s) ─┐
 
 | 参数 | 默认值 | 单位 | 说明 |
 | ---- | ---- | ---- | ---- |
-| `FW_ADRC_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管滚转/俯仰 |
+| `FW_ADRC_R_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管滚转轴 |
+| `FW_ADRC_P_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管俯仰轴 |
 
 | `FW_ADRC_B0_R` | 25.0 | rad/s² | 滚转模型增益 b0 |
 | `FW_ADRC_WC_R` | 10.0 | rad/s | 滚转控制器带宽 ωc（闭环极点 −ωc） |
@@ -314,6 +315,8 @@ vehicle_rates_setpoint (rad/s) ─┐
 | `FW_ADRC_WC_P` | 8.0 | rad/s | 俯仰控制器带宽 ωc |
 
 TD 带宽固定 40 rad/s（`LADRC1` 类内 `kTdLambda` 常量）；观测器带宽固定为 4×ωc（`LADRC1` 类内 `kWoRatio` 常量，Gao 建议 3~5×）：两者均不参数化（带宽参数化的本意即把可调量压缩为 b0 + 一个带宽），如需调整修改常量后重新编译。
+
+注：原单一开关 `FW_ADRC_EN` 已拆分为 `FW_ADRC_R_EN` / `FW_ADRC_P_EN` 两轴独立开关（旧保存值失效，需重新设置）。
 
 **注意参数耦合**：`WC`（ωc）是唯一的“总强度”旋钮，一个参数同时决定
 - 比例增益：kp = ωc；
@@ -380,7 +383,8 @@ param set FORM_YAW_K 0.3
 param set CA_R2P_K 0.0
 param set COM_OF_LOSS_T 1.0
 
-param set FW_ADRC_EN 1
+param set FW_ADRC_R_EN 1
+param set FW_ADRC_P_EN 1
 param set FW_ADRC_B0_R 25.0
 param set FW_ADRC_WC_R 10.0
 param set FW_ADRC_B0_P 20.0
@@ -404,7 +408,8 @@ param set FORM_YAW_K 0.3
 param set CA_R2P_K 0.0
 param set COM_OF_LOSS_T 1.0
 
-param set FW_ADRC_EN 1
+param set FW_ADRC_R_EN 1
+param set FW_ADRC_P_EN 1
 param set FW_ADRC_B0_R 25.0
 param set FW_ADRC_WC_R 10.0
 param set FW_ADRC_B0_P 20.0
@@ -419,7 +424,7 @@ reboot
 - `FORM_HINGE_K` 初始 `1.0`（等效 1 s 几何时间尺度），按试飞中铰链过渡过程的从机俯仰跟随效果调整；
 - 从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
 - 主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。
-- 速率内环 LADRC：从机示例已按 `FW_ADRC_EN=1` 配置（左右从机一起开、保持对称），主机暂为 `0`（保留 PID 作为基准，从机验证通过后可再置 1）；`B0 / WC` 为按仿真机型估算的初值（ωo 固定 4×ωc，见 6.3 节），实机请按各自舵面行程核对。
+- 速率内环 LADRC：从机示例已按 `FW_ADRC_R_EN=1` / `FW_ADRC_P_EN=1` 配置（左右从机一起开、保持对称），主机两轴暂为 `0`（保留 PID 作为基准，从机验证通过后可再置 1）；`B0 / WC` 为按仿真机型估算的初值（ωo 固定 4×ωc，见 6.3 节），实机请按各自舵面行程核对。
 
 ### 6.6 传输验证方法
 
@@ -464,7 +469,7 @@ listener vehicle_rates_setpoint -r 5 -n 20
 
 此时应能看到 `fw_att_control` 根据 `vehicle_attitude_setpoint` 继续生成的 `roll/pitch/yaw/thrust_body[0]` 更新（偏航通道由协调转弯按滚转生成）。
 
-如已启用速率内环 LADRC（`FW_ADRC_EN=1`），可进一步检查速率跟踪：
+如已启用速率内环 LADRC（`FW_ADRC_R_EN=1` 或 `FW_ADRC_P_EN=1`），可进一步检查速率跟踪：
 
 ```bash
 listener vehicle_angular_velocity -r 5 -n 20

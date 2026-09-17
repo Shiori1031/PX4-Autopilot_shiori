@@ -219,7 +219,8 @@ private:
 
 		(ParamInt<px4::params::FW_SPOILERS_MAN>) _param_fw_spoilers_man,
 
-		(ParamInt<px4::params::FW_ADRC_EN>) _param_fw_adrc_en,
+		(ParamInt<px4::params::FW_ADRC_R_EN>) _param_fw_adrc_r_en,
+		(ParamInt<px4::params::FW_ADRC_P_EN>) _param_fw_adrc_p_en,
 		(ParamFloat<px4::params::FW_ADRC_B0_R>) _param_fw_adrc_b0_r,
 		(ParamFloat<px4::params::FW_ADRC_B0_P>) _param_fw_adrc_b0_p,
 		(ParamFloat<px4::params::FW_ADRC_WC_R>) _param_fw_adrc_wc_r,
@@ -227,8 +228,8 @@ private:
 	)
 
 	RateControl _rate_control; ///< class for rate control calculations
-	LADRC1 _ladrc_roll;        ///< LADRC1 内环 — 滚转轴 (FW_ADRC_EN=1 时替换 PID)
-	LADRC1 _ladrc_pitch;       ///< LADRC1 内环 — 俯仰轴 (FW_ADRC_EN=1 时替换 PID)
+	LADRC1 _ladrc_roll;        ///< LADRC1 内环 — 滚转轴 (FW_ADRC_R_EN=1 时替换 PID)
+	LADRC1 _ladrc_pitch;       ///< LADRC1 内环 — 俯仰轴 (FW_ADRC_P_EN=1 时替换 PID)
 	GainCompression3d _gain_compression{this};
 
 	void updateActuatorControlsStatus(float dt);
