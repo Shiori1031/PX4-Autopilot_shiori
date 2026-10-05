@@ -259,6 +259,9 @@ PARAM_DEFINE_FLOAT(FW_ADRC_B0_P, 20.0f);
  * LADRC roll rate controller bandwidth
  *
  * Closed loop behaves as first order with pole at -FW_ADRC_WC_R.
+ * Default start value matches the native PID rate loop bandwidth (closed loop
+ * pole about 4 rad/s): increase in flight for faster tracking, decrease if
+ * oscillating.
  *
  * @unit rad/s
  * @min 0.1
@@ -267,12 +270,15 @@ PARAM_DEFINE_FLOAT(FW_ADRC_B0_P, 20.0f);
  * @increment 0.5
  * @group FW ADRC
  */
-PARAM_DEFINE_FLOAT(FW_ADRC_WC_R, 10.0f);
+PARAM_DEFINE_FLOAT(FW_ADRC_WC_R, 4.0f);
 
 /**
  * LADRC pitch rate controller bandwidth
  *
  * Closed loop behaves as first order with pole at -FW_ADRC_WC_P.
+ * Default start value matches the native PID rate loop bandwidth (closed loop
+ * pole about 3 rad/s): increase in flight for faster tracking, decrease if
+ * oscillating.
  *
  * @unit rad/s
  * @min 0.1
@@ -281,7 +287,7 @@ PARAM_DEFINE_FLOAT(FW_ADRC_WC_R, 10.0f);
  * @increment 0.5
  * @group FW ADRC
  */
-PARAM_DEFINE_FLOAT(FW_ADRC_WC_P, 8.0f);
+PARAM_DEFINE_FLOAT(FW_ADRC_WC_P, 3.0f);
 
 /**
  * Roll rate feed forward

@@ -562,10 +562,10 @@ PARAM_DEFINE_INT32(FORM_POSITION, 0);
  * @min 0.0
  * @max 5.0
  * @decimal 3
- * @increment 0.05
+ * @increment 0.01
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_HINGE_K, 1.0f);
+PARAM_DEFINE_FLOAT(FORM_HINGE_K, 0.01f);
 
 /**
  * Maximum follower roll attitude setpoint magnitude
@@ -610,8 +610,8 @@ PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
  * @min 0.0
  * @max 5.0
  * @decimal 3
- * @increment 0.05
+ * @increment 0.1
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_YAW_K, 0.3f);
+PARAM_DEFINE_FLOAT(FORM_YAW_K, 3.0f);
 
