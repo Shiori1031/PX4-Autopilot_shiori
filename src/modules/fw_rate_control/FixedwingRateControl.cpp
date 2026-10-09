@@ -91,6 +91,21 @@ FixedwingRateControl::parameters_update()
 	_ladrc_roll.setGains(_param_fw_adrc_b0_r.get(), _param_fw_adrc_wc_r.get());
 	_ladrc_pitch.setGains(_param_fw_adrc_b0_p.get(), _param_fw_adrc_wc_p.get());
 
+	// ADRC 开关跳变时清零对应轴 PID 积分: 接管期间该轴 PID 输出被丢弃但积分仍在累积,
+	// 不清零会在切回 PID 的瞬间以旧积分造成力矩突跳 (LADRC 自身有 z2 隐式积分, 不受影响)
+	const int32_t adrc_r_en = _param_fw_adrc_r_en.get();
+	const int32_t adrc_p_en = _param_fw_adrc_p_en.get();
+
+	if (adrc_r_en != _param_fw_adrc_r_en_prev) {
+		_rate_control.resetIntegral(0);
+		_param_fw_adrc_r_en_prev = adrc_r_en;
+	}
+
+	if (adrc_p_en != _param_fw_adrc_p_en_prev) {
+		_rate_control.resetIntegral(1);
+		_param_fw_adrc_p_en_prev = adrc_p_en;
+	}
+
 	if (_handle_param_vt_fw_difthr_en != PARAM_INVALID) {
 		param_get(_handle_param_vt_fw_difthr_en, &_param_vt_fw_difthr_en);
 	}
@@ -449,9 +464,25 @@ void FixedwingRateControl::Run()
 				 * - UAVCAN_PUB_FORM: 编队控制广播开关，主机发送时应为1
 				 * 先判断推力设定值是不是正常有限数
 				 * 主机侧在固定翼速率控制输出阶段额外叠加一项偏航同步加速：
-				 *   thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K
+				 *   手动类模式: thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K    (杆量 0~1, 保持原行为)
+				 *   自主类模式: thrust += 0.5 * abs(rates_sp.yaw) * FORM_YAW_K  (偏航速率指令 rad/s,
+				 *               直飞≈0, 转弯时按协调转弯速率增推; 非手动时 manual_control_setpoint
+				 *               不再刷新, 不能用杆量)
 				 */
-				_vehicle_thrust_setpoint.xyz[0] = PX4_ISFINITE(_rates_sp.thrust_body[0]) ? math::constrain(_rates_sp.thrust_body[0] + (((_param_form_follower_en == 0) && (_param_uavcan_pub_form == 1)) ? 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k : 0.0f), 0.f, 1.f) : 0.0f;
+				float yaw_boost = 0.f;
+
+				if ((_param_form_follower_en == 0) && (_param_uavcan_pub_form == 1)) {
+					if (_vcontrol_mode.flag_control_manual_enabled) {
+						// 手动类模式: 杆量偏航 (0~1)
+						yaw_boost = 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k;
+
+					} else {
+						// 自主类模式: 偏航速率指令 [rad/s]
+						yaw_boost = 0.5f * fabsf(_rates_sp.yaw) * _param_form_yaw_k;
+					}
+				}
+
+				_vehicle_thrust_setpoint.xyz[0] = PX4_ISFINITE(_rates_sp.thrust_body[0]) ? math::constrain(_rates_sp.thrust_body[0] + yaw_boost, 0.f, 1.f) : 0.0f;
 
 				/* scale effort by battery status */
 				if (_param_fw_bat_scale_en.get() && _vehicle_thrust_setpoint.xyz[0] > 0.1f) {

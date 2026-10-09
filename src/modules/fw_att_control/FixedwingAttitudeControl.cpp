@@ -87,6 +87,8 @@ FixedwingAttitudeControl::FixedwingAttitudeControl(bool vtol) :
 	_attitude_sp_pub(vtol ? ORB_ID(fw_virtual_attitude_setpoint) : ORB_ID(vehicle_attitude_setpoint)),
 	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle"))
 {
+	_handle_param_form_follower_en = param_find("FORM_FOLLOWER_EN");
+
 	/* fetch initial parameter values */
 	parameters_update();
 }
@@ -124,6 +126,11 @@ FixedwingAttitudeControl::parameters_update()
 	_wheel_ctrl.set_k_ff(_param_fw_wr_ff.get());
 	_wheel_ctrl.set_integrator_max(_param_fw_wr_imax.get());
 	_wheel_ctrl.set_max_rate(radians(_param_fw_w_rmax.get()));
+
+	// 编队从机开关 (定义于 uavcan_params.c): 1=从机 -> 消费主机偏航速率指令
+	if (_handle_param_form_follower_en != PARAM_INVALID) {
+		param_get(_handle_param_form_follower_en, &_param_form_follower_en);
+	}
 }
 
 void
@@ -381,6 +388,20 @@ void FixedwingAttitudeControl::Run()
 					if (_vcontrol_mode.flag_control_manual_enabled) {
 						body_rates_setpoint(2) += math::constrain(_manual_control_setpoint.yaw * radians(_param_man_yr_max.get()),
 									  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
+					}
+
+				// 编队从机: 消费主机偏航速率指令 (接收端写入 att_sp.yaw_sp_move_rate)
+				// 铰链约束相对偏航 → 从机偏航速率跟随主机指令, 替换自身协调转弯项(避免双计);
+				// 指令≈0(通道无数据)或本机手动接管时回退原协调转弯逻辑
+					const float yaw_rate_cmd_ff = _att_sp.yaw_sp_move_rate;
+
+					if ((_param_form_follower_en != 0)
+					    && !_vcontrol_mode.flag_control_manual_enabled
+					    && (hrt_elapsed_time(&_att_sp.timestamp) < 100_ms)
+					    && PX4_ISFINITE(yaw_rate_cmd_ff)
+					    && (fabsf(yaw_rate_cmd_ff) > 0.01f)) {
+						body_rates_setpoint(2) = math::constrain(yaw_rate_cmd_ff,
+										  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
 					}
 
 					// Tailsitter: transform from FW to hover frame (all interfaces are in hover (body) frame)

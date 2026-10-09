@@ -82,7 +82,11 @@ float LADRC1::update(float y, float r, float dt, bool landed)
 	// ② ESO (2 阶): z1→y, z2→f
 	if (landed || !PX4_ISFINITE(y)) {
 		// 地面/信号异常: 保持复位, 防止估计漂移
-		_z1 = y;
+		// (y 非有限时保留旧 z1, 避免把 NaN 注入观测器)
+		if (PX4_ISFINITE(y)) {
+			_z1 = y;
+		}
+
 		_z2 = 0.f;
 
 	} else {
@@ -95,9 +99,16 @@ float LADRC1::update(float y, float r, float dt, bool landed)
 	float u = (_kp * (r_smooth - _z1) + r_dot - _z2) / _b0;
 
 	if (!PX4_ISFINITE(u)) {
+		// 异常兜底: 输出清零 + 观测器复位; TD 标记重吸附
+		// (指令恢复有限后下一拍自动回正, 防止 NaN 永久锁死该轴)
 		u = 0.f;
-		_z1 = y;
+
+		if (PX4_ISFINITE(y)) {
+			_z1 = y;
+		}
+
 		_z2 = 0.f;
+		_snap = true;
 	}
 
 	_u_prev = u;   // 默认回写; 下游限幅后由 setAppliedControl() 覆写为实际施加值

@@ -79,34 +79,37 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 	matrix::Quatf q_sp(att_sp.q_d);
 	matrix::Eulerf euler_sp(q_sp);
 
-	// 偏航指令源：手动姿态操纵模式使用速率设定（操纵杆偏航已折算在内），
-	// 自主模式使用导航解算的偏航速率指令
-	const bool manual_attitude_mode =
-		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_MANUAL)
-		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_STAB)
-		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_ACRO)
-		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_ALTCTL)
-		|| (status.nav_state == vehicle_status_s::NAVIGATION_STATE_POSCTL);
-
-	float yaw_cmd = manual_attitude_mode ? rates_sp.yaw : att_sp.yaw_sp_move_rate;
-
-	if (!PX4_ISFINITE(yaw_cmd)) {
-		// 异常回退：优先速率设定，仍无效则归零
-		yaw_cmd = rates_sp.yaw;
-	}
-
-	if (!PX4_ISFINITE(yaw_cmd)) {
-		yaw_cmd = 0.0f;
-	}
-
 	// 将主机期望控制姿态（姿态设定、滚转速率前馈、推力设定与偏航指令）封装到消息中
 	dronecan::formation::ControlInput msg;
 	msg.thrust = math::constrain(att_sp.thrust_body[0], 0.0f, 1.0f);
 	msg.pitch = euler_sp.theta();
-	msg.yaw = yaw_cmd;
 	msg.roll_target = euler_sp.phi();
 	msg.roll_rate_target = rates_sp.roll;
 	msg.flags = dronecan::formation::ControlInput::FLAG_VALID;
+
+	// 偏航指令源：手动姿态操纵模式使用速率设定（操纵杆偏航已折算在内），
+	// 自主/半自主模式使用导航解算的偏航速率指令
+	const bool host_in_manual_attitude =
+		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_MANUAL) ||
+		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_STAB) ||
+		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_ACRO) ||
+		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_ALTCTL) ||
+		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_POSCTL);
+
+	if (host_in_manual_attitude) {
+		// yaw: 协调转弯 + 遥控器 的角速率
+		// yaw_sp_move_rate: 固定翼自身链路无生产者，恒 0
+		// 纯手动/自稳：直接使用 rates_sp.yaw（含操纵杆偏航输入）
+		msg.yaw = PX4_ISFINITE(rates_sp.yaw) ? rates_sp.yaw : 0.0f;
+
+	} else if (PX4_ISFINITE(att_sp.yaw_sp_move_rate)) {
+		// 自主/半自主模式：使用导航系统设定的偏航速率
+		msg.yaw = att_sp.yaw_sp_move_rate;
+
+	} else {
+		// 最终回退：优先速率设定
+		msg.yaw = PX4_ISFINITE(rates_sp.yaw) ? rates_sp.yaw : 0.0f;
+	}
 
 	(void)_publisher.broadcast(msg);
 }

@@ -76,10 +76,10 @@ matrix::Eulerf euler_sp(q_sp);
 - `roll_rate_target` 装载 `rates_sp.roll`（期望滚转速率），作为从机铰链修正的前馈参考；
 - `thrust` 装载 `att_sp.thrust_body[0]`（主机推力设定），发送前 `constrain` 到 `[0, 1]`；
 - `yaw` 按主机飞行模式切换数据源：
-  - 手动姿态操纵模式（MANUAL / STAB / ACRO / ALTCTL / POSCTL）：取 `rates.yaw`（操纵杆偏航已折算在内）；
-  - 自主/半自主模式（AUTO / MISSION / OFFBOARD 等）：取 `att_sp.yaw_sp_move_rate`（导航解算的偏航速率）。
+  - 手动姿态操纵模式（MANUAL / STAB / ACRO / ALTCTL / POSCTL）：取 `rates.yaw`（协调转弯＋操纵杆偏航，见下方背景说明）；
+  - 自主/半自主模式（AUTO / MISSION / OFFBOARD 等）：取 `att_sp.yaw_sp_move_rate`。**已知限制**：固定翼链路中无模块写入该字段（导航的偏航意图实际体现在 `rates_sp.yaw` 的协调转弯项里），自主模式下实际发出 0，偏航源修正待后续处理。
 
-背景说明：手动模式下 `fw_att_control` 发布的 `att_sp.yaw_sp_move_rate` 保持零初始化值（`0.0f` 是有限值，`PX4_ISFINITE()` 检查会误通过），因此必须显式判断 `nav_state` 才能取到真正的偏航指令源。
+背景说明：手动态下 `rates.yaw` ＝ 协调转弯项（`fw_att_control` 由滚转设定解算，`tan(φ)·cos(θ)·g/V` 系列）＋ 操纵杆偏航（经 `FW_MAN_YR_MAX` 折算，限幅 ±`FW_Y_RMAX`），是固定翼唯一真实的"偏航速率指令"来源；`att_sp.yaw_sp_move_rate` 为多旋翼/offboard 语义字段，固定翼原生链路（fw_att_control / fw_lateral_longitudinal）从不写入——手动模式下它为零初始化值（`0.0f` 是有限值，`PX4_ISFINITE()` 检查会误通过），故必须显式判断 `nav_state`。
 
 发送门控：固定翼或过渡模式，且 `att_sp` 时间戳距今不超过 500 ms。
 
@@ -91,7 +91,7 @@ matrix::Eulerf euler_sp(q_sp);
 因此：
 - 从机 `roll/pitch` 姿态设定值直接跟随主机的姿态设定（`roll_target / pitch`），从机不再做摇杆重映射；
 - `pitch` 通道额外叠加一项铰链运动学前馈：`side_sign * FORM_HINGE_K * roll_rate_target`，用于补偿编队滚转时的翼尖铰链几何耦合；
-- 从机姿态设定的航向分量保持**自身当前航向**（不接收航向位置指令），偏航运动由 `yaw_sp_move_rate = msg.yaw` 与滚转协调转弯共同决定；
+- 从机姿态设定的航向分量保持**自身当前航向**（不接收航向位置指令）；偏航运动由 `yaw_sp_move_rate = msg.yaw` 直接驱动（`FORM_FOLLOWER_EN=1` 时 `fw_att_control` 用它替换自身协调转弯项，见 5.3 节），无有效指令时回退滚转协调转弯；
 - 从机推力直接透传主机推力设定；转弯外侧增推与滚转→俯仰力矩混控均移到 `ControlAllocator` 中完成；
 - 从机控制链只有在自身飞行模式已经切入 Offboard 时才真正接管。
 
@@ -135,13 +135,16 @@ thrust_body[0]   = constrain(msg.thrust, 0, 1)   # 主机推力直接透传
 - 主机滚转设定直接作为左、右从机的滚转设定（同一目标），三机滚转动作同源、无跟踪滞后链条；
 - 主机以速率 `p` 滚转（或计划滚转）时，翼尖铰链约束迫使两侧从机产生几何上必需的点头/抬头运动；`FORM_HINGE_K * p` 作为前馈量叠加到从机俯仰设定，让从机主动完成该运动，而不是被动承受铰链结构载荷；
 - 左右从机铰链修正方向相反（`side_sign` 镜像），对应链翼构型"铰链释放相对滚转、约束相对偏航"的约束特征；
-- 从机航向保持自身，仅通过 `yaw_sp_move_rate` 接收偏航速率意图；固定翼从机的实际转弯由 `fw_att_control` 的协调转弯控制器按滚转生成（详见 5.3 节），与主机滚转同源；
+- 从机航向保持自身，通过 `yaw_sp_move_rate` 接收偏航速率意图并由 `fw_att_control` 直接跟踪（`FORM_FOLLOWER_EN=1`：替换自身协调转弯项；无有效指令或本机手动接管时回退协调转弯，详见 5.3 节），偏航与主机经铰链保持一致；
 - 从机推力透传主机推力设定：主机在自主模式（TECS 推力输出）或手动模式（油门映射）下，从机都能正确跟随；
-- 主机侧仍保留一项偏航同步加速（`FixedwingRateControl` 内，仅主机且 `UAVCAN_PUB_FORM=1` 时生效）：
+- 主机侧仍保留一项偏航同步加速（`FixedwingRateControl` 内，仅主机且 `UAVCAN_PUB_FORM=1` 时生效，按模式取信号源）：
 
 ```text
-master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
+手动类模式 (flag_control_manual_enabled): master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
+自主类模式 (AUTO/OFFBOARD 等):            master_thrust = thrust_body[0] + 0.5 * abs(rates_sp.yaw) * FORM_YAW_K
 ```
+
+说明：手动类按杆量（0~1，保持原行为）；自主类按偏航速率指令 `rates_sp.yaw`（rad/s，直飞≈0、转弯时按协调转弯速率增推）。非手动模式下 `manual_control_setpoint` 不再刷新，不能用杆量（否则取到切换前的残留值）。
 
 ### 4.3 分配器执行级补偿（从机）
 
@@ -208,12 +211,12 @@ FormationRatesBridge
   -> vehicle_attitude_setpoint (q_d / yaw_sp_move_rate / thrust_body)
   -> Commander 进入/维持 Offboard attitude 控制链
   -> FixedwingAttitudeControl：从 q_d 取 roll/pitch 生成速率设定；
-     偏航由协调转弯控制器按滚转生成（不消费 q_d 的 yaw 分量与 yaw_sp_move_rate）
+     从机（FORM_FOLLOWER_EN=1）消费 yaw_sp_move_rate → 替换自身协调转弯项（见下方说明）
   -> FixedwingRateControl 生成 vehicle_torque_setpoint / vehicle_thrust_setpoint
   -> ControlAllocator（从机）：叠加滚转→俯仰混控与外侧增推后解算到舵面/电机
 ```
 
-注意：当前 `fw_att_control` 在 attitude 模式下**只消费 `q_d` 的 roll/pitch 分量**，从机偏航速率实际由协调转弯控制器按滚转设定生成（`r_sp ≈ tan(φ)·cos(θ)·g/V`），不读取 `yaw_sp_move_rate`。因此从机实际转弯由滚转主导、与主机同源；`yaw_sp_move_rate` 写入姿态设定属于预留通道，待后续为固定翼偏航前馈打补丁后才能生效。
+注意：`yaw_sp_move_rate` 的消费端已实现（2026-10-09）：`fw_att_control` 姿态分支中，`FORM_FOLLOWER_EN=1` 且收到新鲜指令（`att_sp` 时间戳 <100 ms、非手动接管、`|yaw_sp_move_rate| > 0.01 rad/s`）时，用主机偏航速率指令**替换**自身协调转弯项并发布（限幅 ±`FW_Y_RMAX`）——铰链约束相对偏航（两机偏航速率应一致），且主机指令本身已含其协调转弯分量，故采用替换而非叠加；条件不满足时回退原协调转弯逻辑（行为不变）。从机偏航力矩因此与偏航指令同向，`ControlAllocator` 外侧增推门（`max(side_sign·τz,0)`）在编队机动中可按设计触发；从机姿态设定的航向角分量与 `q_d` 的 yaw 分量仍不被消费（从机保持自身航向）。
 
 速率内环可选启用 LADRC（`FW_ADRC_R_EN` / `FW_ADRC_P_EN` 分轴独立开启，见 5.4 节）；偏航与其余链路不受影响。
 
@@ -251,12 +254,12 @@ vehicle_rates_setpoint (rad/s) ─┐
 
 关键工程点：
 
-- **影子运行**：某轴开关为 0 时该轴 LADRC 仍每拍计算（不接管输出），保证飞行中随时切换无跳变；
+- **影子运行**：某轴开关为 0 时该轴 LADRC 仍每拍计算（不接管输出），保证飞行中随时切换无跳变；开关跳变时自动清零对应轴 PID 积分（接管期间该轴 PID 输出被丢弃，积分不清零会在切回瞬间造成力矩突跳）；
 - **反饱和**：ESO 模型输入使用限幅后的"实际施加值"（trim 项由 z2 自适应吸收）；
-- **复位**：`rates_sp.reset_integral`、落地、非固定翼状态、控制量非有限时，ESO/TD 热启动复位（避免初始瞬态）；
+- **复位**：`rates_sp.reset_integral`、落地、非固定翼状态、控制量非有限时，ESO/TD 热启动复位（避免初始瞬态）；测量/指令出现非有限值时内部兜底（异常拍输出清零 + TD 重吸附），NaN 不扩散、也不会锁死该轴；
 - **日志**：某轴被接管时，`rate_ctrl_status.rollspeed_integ / pitchspeed_integ` 中对应字段记录该轴的 z2 扰动估计（未接管轴与偏航仍为 PID 积分）；
 - tailsitter 场景自动回退 PID；偏航轴、姿态外环、前馈/trim/空速缩放逻辑均未改动；
-- 状态：2026-10-05 编译验证通过（cuav_7-nano），速率环默认参数按极点对标下调（见 6.3 节）；未实飞。
+- 状态：2026-10-09 编译验证通过（cuav_7-nano；含非有限值兜底与开关跳变清零积分、主机增推按模式取源、从机偏航指令消费端），速率环默认参数按极点对标（见 6.3 节）；未实飞。
 
 ## 6. 实际生效参数
 
@@ -268,7 +271,7 @@ vehicle_rates_setpoint (rad/s) ─┐
 | `UAVCAN_NODE_ID` | 本机节点 ID，主机固定为 `1` |
 | `UAVCAN_PUB_FORM` | 发送器使能，设为 `1` |
 | `FORM_FOLLOWER_EN` | 主机应设为 `0`，用于区分主机/从机身份 |
-| `FORM_YAW_K` | 主机偏航同步加速系数（`FixedwingRateControl` 内，仅主机生效）。与从机分配器增推**共用同一参数名**：固件默认 `3.0` 是按从机增推效果定的，**主机侧建议显式设小值（示例 `0.3`）** |
+| `FORM_YAW_K` | 主机偏航同步加速系数（`FixedwingRateControl` 内，仅主机生效；手动类按杆量、自主类按 `rates_sp.yaw`，见 4.2 节）。与从机分配器增推**共用同一参数名**：固件默认 `3.0` 是按从机增推效果定的，**主机侧建议显式设小值（示例 `0.3`）** |
 
 ### 6.2 从机参数（左/右机）
 
@@ -287,7 +290,7 @@ vehicle_rates_setpoint (rad/s) ─┐
 | `FORM_HINGE_K` | 0.01 | 铰链修正前馈增益（单位：s）：`pitch += side_sign * FORM_HINGE_K * 主机期望滚转速率`（地面测试值） |
 | `FORM_ROLL_AMAX` | 0.52 | 从机滚转姿态设定限幅（rad） |
 | `FORM_PTCH_AMAX` | 0.35 | 从机俯仰姿态设定限幅（rad，含铰链修正） |
-| `FORM_YAW_K` | 3.0 | 分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K`（地面测试值；主机侧同名参数用于手动偏航同步增推，建议显式设小值，见 6.1 节） |
+| `FORM_YAW_K` | 3.0 | 分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K`（地面测试值；主机侧同名参数用于偏航同步增推——手动类按杆量、自主类按偏航速率指令，建议显式设小值，见 6.1 节） |
 
 分配器参数（`Control Allocation` 组，仅从机生效）：
 | 参数 | 默认 | 说明 |

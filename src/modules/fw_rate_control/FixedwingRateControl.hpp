@@ -232,6 +232,9 @@ private:
 	LADRC1 _ladrc_pitch;       ///< LADRC1 内环 — 俯仰轴 (FW_ADRC_P_EN=1 时替换 PID)
 	GainCompression3d _gain_compression{this};
 
+	int32_t _param_fw_adrc_r_en_prev{0}; ///< 上一状态 FW_ADRC_R_EN, 检测开关跳变 (跳变时清零滚转轴 PID 积分)
+	int32_t _param_fw_adrc_p_en_prev{0}; ///< 上一状态 FW_ADRC_P_EN, 检测开关跳变 (跳变时清零俯仰轴 PID 积分)
+
 	void updateActuatorControlsStatus(float dt);
 
 	/**

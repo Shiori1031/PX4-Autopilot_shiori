@@ -133,6 +133,9 @@ private:
 	bool _in_fw_or_transition_wo_tailsitter_transition{false}; // only run the FW attitude controller in these states
 	float _steering_wheel_yaw_setpoint{NAN};
 
+	param_t _handle_param_form_follower_en{PARAM_INVALID};	/**< 编队从机开关 (FORM_FOLLOWER_EN, 定义于 uavcan_params.c) */
+	int32_t _param_form_follower_en{0};			/**< 编队从机: 消费主机偏航速率指令 (见 Run 姿态分支) */
+
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::FW_AIRSPD_MAX>) _param_fw_airspd_max,
 		(ParamFloat<px4::params::FW_AIRSPD_MIN>) _param_fw_airspd_min,
