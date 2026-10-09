@@ -386,14 +386,14 @@ param set FORM_ROLL_AMAX 0.52
 param set FORM_PTCH_AMAX 0.35
 param set FORM_YAW_K 3
 param set CA_R2P_K 0.5
-param set COM_OF_LOSS_T 1.0
+param set COM_OF_LOSS_T 5.0
 
 param set FW_ADRC_R_EN 1
 param set FW_ADRC_P_EN 1
 param set FW_ADRC_B0_R 25.0
 param set FW_ADRC_WC_R 4.0
-param set FW_ADRC_B0_P 20.0
-param set FW_ADRC_WC_P 3.0
+param set FW_ADRC_B0_P 2.0
+param set FW_ADRC_WC_P 10.0
 param save
 reboot
 ```
