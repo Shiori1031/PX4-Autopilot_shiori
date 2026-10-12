@@ -311,15 +311,15 @@ vehicle_rates_setpoint (rad/s) ─┐
 | `FW_ADRC_R_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管滚转轴 |
 | `FW_ADRC_P_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管俯仰轴 |
 
-| `FW_ADRC_B0_R` | 25.0 | rad/s² | 滚转模型增益 b0 |
-| `FW_ADRC_WC_R` | 4.0 | rad/s | 滚转控制器带宽 ωc（闭环极点 −ωc；起步值对标原生 PID 速率环极点） |
+| `FW_ADRC_R_B0` | 25.0 | rad/s² | 滚转模型增益 b0 |
+| `FW_ADRC_R_WC` | 4.0 | rad/s | 滚转控制器带宽 ωc（闭环极点 −ωc；起步值对标原生 PID 速率环极点） |
 
-| `FW_ADRC_B0_P` | 20.0 | rad/s² | 俯仰模型增益 b0 |
-| `FW_ADRC_WC_P` | 3.0 | rad/s | 俯仰控制器带宽 ωc（起步值对标原生 PID 速率环极点） |
+| `FW_ADRC_P_B0` | 20.0 | rad/s² | 俯仰模型增益 b0 |
+| `FW_ADRC_P_WC` | 3.0 | rad/s | 俯仰控制器带宽 ωc（起步值对标原生 PID 速率环极点） |
 
 TD 带宽固定 40 rad/s（`LADRC1` 类内 `kTdLambda` 常量）；观测器带宽固定为 4×ωc（`LADRC1` 类内 `kWoRatio` 常量，Gao 建议 3~5×）：两者均不参数化（带宽参数化的本意即把可调量压缩为 b0 + 一个带宽），如需调整修改常量后重新编译。
 
-注：原单一开关 `FW_ADRC_EN` 已拆分为 `FW_ADRC_R_EN` / `FW_ADRC_P_EN` 两轴独立开关（旧保存值失效，需重新设置）。
+注：原单一开关 `FW_ADRC_EN` 已拆分为 `FW_ADRC_R_EN` / `FW_ADRC_P_EN` 两轴独立开关；`b0`/`WC` 参数亦改为轴前缀命名：`FW_ADRC_R_B0` / `FW_ADRC_R_WC` / `FW_ADRC_P_B0` / `FW_ADRC_P_WC`（与轴开关命名对齐）。以上旧名在固件中均不再存在，旧保存值失效，升级后需重新设置。
 
 **注意参数耦合**：`WC`（ωc）是唯一的“总强度”旋钮，一个参数同时决定
 - 比例增益：kp = ωc；
@@ -369,6 +369,13 @@ param set UAVCAN_NODE_ID 1
 param set UAVCAN_PUB_FORM 1
 param set FORM_FOLLOWER_EN 0
 param set FORM_YAW_K 0.3
+
+param set FW_ADRC_P_EN 1
+param set FW_ADRC_P_B0 2.0
+param set FW_ADRC_P_WC 10.0
+param set FW_ADRC_R_EN 0
+param set FW_ADRC_R_B0 25.0
+param set FW_ADRC_R_WC 4.0
 param save
 reboot
 ```
@@ -388,12 +395,12 @@ param set FORM_YAW_K 3
 param set CA_R2P_K 0.5
 param set COM_OF_LOSS_T 5.0
 
-param set FW_ADRC_R_EN 1
 param set FW_ADRC_P_EN 1
-param set FW_ADRC_B0_R 25.0
-param set FW_ADRC_WC_R 4.0
-param set FW_ADRC_B0_P 2.0
-param set FW_ADRC_WC_P 10.0
+param set FW_ADRC_P_B0 2.0
+param set FW_ADRC_P_WC 10.0
+param set FW_ADRC_R_EN 0
+param set FW_ADRC_R_B0 25.0
+param set FW_ADRC_R_WC 4.0
 param save
 reboot
 ```

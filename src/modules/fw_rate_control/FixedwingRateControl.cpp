@@ -88,8 +88,8 @@ FixedwingRateControl::parameters_update()
 		Vector3f(_param_fw_rr_imax.get(), _param_fw_pr_imax.get(), _param_fw_yr_imax.get()));
 
 	// LADRC 内环参数 (仅滚转/俯仰; 偏航保持 PID; TD 带宽与观测器带宽固定于 LADRC1 类内)
-	_ladrc_roll.setGains(_param_fw_adrc_b0_r.get(), _param_fw_adrc_wc_r.get());
-	_ladrc_pitch.setGains(_param_fw_adrc_b0_p.get(), _param_fw_adrc_wc_p.get());
+	_ladrc_roll.setGains(_param_fw_adrc_r_b0.get(), _param_fw_adrc_r_wc.get());
+	_ladrc_pitch.setGains(_param_fw_adrc_p_b0.get(), _param_fw_adrc_p_wc.get());
 
 	// ADRC 开关跳变时清零对应轴 PID 积分: 接管期间该轴 PID 输出被丢弃但积分仍在累积,
 	// 不清零会在切回 PID 的瞬间以旧积分造成力矩突跳 (LADRC 自身有 z2 隐式积分, 不受影响)
