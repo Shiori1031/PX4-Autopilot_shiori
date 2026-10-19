@@ -140,8 +140,8 @@ thrust_body[0]   = constrain(msg.thrust, 0, 1)   # 主机推力直接透传
 - 主机侧仍保留一项偏航同步加速（`FixedwingRateControl` 内，仅主机且 `UAVCAN_PUB_FORM=1` 时生效，按模式取信号源）：
 
 ```text
-手动类模式 (flag_control_manual_enabled): master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K
-自主类模式 (AUTO/OFFBOARD 等):            master_thrust = thrust_body[0] + 0.5 * abs(rates_sp.yaw) * FORM_YAW_K
+手动类模式 (flag_control_manual_enabled): master_thrust = thrust_body[0] + 0.5 * abs(manual.yaw) * FORM_YAW_K_M
+自主类模式 (AUTO/OFFBOARD 等):            master_thrust = thrust_body[0] + 0.5 * abs(rates_sp.yaw) * FORM_YAW_K_M
 ```
 
 说明：手动类按杆量（0~1，保持原行为）；自主类按偏航速率指令 `rates_sp.yaw`（rad/s，直飞≈0、转弯时按协调转弯速率增推）。非手动模式下 `manual_control_setpoint` 不再刷新，不能用杆量（否则取到切换前的残留值）。
@@ -154,14 +154,29 @@ thrust_body[0]   = constrain(msg.thrust, 0, 1)   # 主机推力直接透传
 // src/modules/control_allocator/ControlAllocator.cpp
 if (_is_follower) {
     // 1) 铰链耦合：把部分滚转力矩引入俯仰通道（左右从机符号相反）
-    c[0](1) += c[0](0) * _roll_to_pitch_mix * _side_sign;
+    //    限幅 + 滚转力矩接近饱和时线性淡出，避免失稳时俯仰通道被放大
+    constexpr float kR2PMax = 0.15f;   // 混控输出硬限幅 (归一化力矩)
+    constexpr float kR2PSat = 0.7f;    // |τx| 超过此值后线性淡出
+    const float roll_torque_abs = fabsf(c[0](0));
+    float r2p_scale = 1.f;
+
+    if (roll_torque_abs > kR2PSat) {
+        r2p_scale = math::constrain((1.f - roll_torque_abs) / (1.f - kR2PSat), 0.f, 1.f);
+    }
+
+    float pitch_mix = c[0](0) * _roll_to_pitch_mix * _side_sign * r2p_scale;
+    pitch_mix = math::constrain(pitch_mix, -kR2PMax, kR2PMax);
+    c[0](1) += pitch_mix;
+
     // 2) 转弯外侧增推：按偏航力矩设定单侧截断叠加推力（只增不减）
     c[0](3) = math::constrain(c[0](3) + math::max(_side_sign * c[0](2), 0.f) * _yaw_throttle_gain, 0.f, 1.f);
 }
 ```
 
 - `_roll_to_pitch_mix` 来自 `CA_R2P_K`（滚转→俯仰混控增益）：从机滚转时升降舵联动一个俯仰修正，用于补偿铰链传递的结构耦合载荷；
-- `_yaw_throttle_gain` 来自 `FORM_YAW_K`（外侧增推系数）：转弯时按从机的偏航力矩设定（`τz`）给**外侧**从机加推（左转时右机增推、右转时左机增推——`side_sign` 与 `τz` 乘积单侧截断自动选出外侧机），内侧机不动作；
+- 混控输出硬限幅为代码内常量 `0.15`：防止俯仰通道被一次性推到饱和；
+- 滚转力矩淡出阈值写死为 `0.7`：`|τx| > 0.7` 后混控线性减小，`|τx|=1` 时完全关闭，避免滚转失稳时继续放大俯仰力矩；
+- `_yaw_throttle_gain` 来自 `FORM_YAW_K`（从机外侧增推系数）：转弯时按从机的偏航力矩设定（`τz`）给**外侧**从机加推（左转时右机增推、右转时左机增推——`side_sign` 与 `τz` 乘积单侧截断自动选出外侧机），内侧机不动作；主机侧改用 `FORM_YAW_K_M`，不再共用该参数；
 - 力矩混控的左右符号由 `side_sign` 自动镜像，无需给左右从机分别配置相反系数；
 - 主机（`FORM_FOLLOWER_EN=0`）下这两项不生效；第二分配实例（多矩阵场景）未包含该定制，当前三机均为单一固定翼有效性矩阵，不受影响。
 
@@ -234,9 +249,11 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 ② ESO (2 阶扩张状态观测器):   e  = z1 − y
                               ż1 = z2 − β1·e + b0·u_prev
                               ż2 = −β2·e        (z1 → 角速率估计, z2 → 总扰动估计 f)
-③ SEF + ④ 扰动补偿:           u = (ωc·(r* − z1) + ṙ* − z2) / b0
+③ SEF + ④ 扰动补偿:           u = (ωc·(r* − z1) + clamp(ṙ*/b0, ±0.3) − z2) / b0
 
 带宽参数化 (Gao, ACC 2003):  β1 = 2ωo, β2 = ωo², kp = ωc（ωo 固定取 4×ωc）;  闭环等价于极点 −ωc 的一阶惯性环节。
+
+微分前馈 `ṙ*/b0` 单独限幅到 ±0.3 控制量（`LADRC1` 类内 `kFfMax` 常量）：b0 偏小或指令翻极时，`ṙ*/b0` 会产生巨大尖峰（b0=2、140°/s 翻极时约 49），限幅后削到 0.3；正常小幅前馈不受影响。
 ```
 
 信号流（下游与 5.3 节一致，仅替换滚转/俯仰通道）：
@@ -271,7 +288,7 @@ vehicle_rates_setpoint (rad/s) ─┐
 | `UAVCAN_NODE_ID` | 本机节点 ID，主机固定为 `1` |
 | `UAVCAN_PUB_FORM` | 发送器使能，设为 `1` |
 | `FORM_FOLLOWER_EN` | 主机应设为 `0`，用于区分主机/从机身份 |
-| `FORM_YAW_K` | 主机偏航同步加速系数（`FixedwingRateControl` 内，仅主机生效；手动类按杆量、自主类按 `rates_sp.yaw`，见 4.2 节）。与从机分配器增推**共用同一参数名**：固件默认 `3.0` 是按从机增推效果定的，**主机侧建议显式设小值（示例 `0.3`）** |
+| `FORM_YAW_K_M` | 主机偏航同步加速系数（`FixedwingRateControl` 内，仅主机生效；手动类按杆量、自主类按 `rates_sp.yaw`，见 4.2 节）。默认 `0.3`，建议首飞先 `0.2~0.3`；`FORM_YAW_K` 现在只用于从机分配器，主机不再读取 |
 
 ### 6.2 从机参数（左/右机）
 
@@ -290,12 +307,12 @@ vehicle_rates_setpoint (rad/s) ─┐
 | `FORM_HINGE_K` | 0.01 | 铰链修正前馈增益（单位：s）：`pitch += side_sign * FORM_HINGE_K * 主机期望滚转速率`（地面测试值） |
 | `FORM_ROLL_AMAX` | 0.52 | 从机滚转姿态设定限幅（rad） |
 | `FORM_PTCH_AMAX` | 0.35 | 从机俯仰姿态设定限幅（rad，含铰链修正） |
-| `FORM_YAW_K` | 3.0 | 分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K`（地面测试值；主机侧同名参数用于偏航同步增推——手动类按杆量、自主类按偏航速率指令，建议显式设小值，见 6.1 节） |
+| `FORM_YAW_K` | 3.0 | 从机分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K`。试飞建议先从 `1.0` 起（不要用 3.0），确认无“越失稳越增推”后再逐步加；主机侧改用 `FORM_YAW_K_M` |
 
 分配器参数（`Control Allocation` 组，仅从机生效）：
 | 参数 | 默认 | 说明 |
 | ---- | ---- | ---- |
-| `CA_R2P_K` | 0.5 | 滚转→俯仰力矩混控增益：`τy += τx * CA_R2P_K * side_sign`（左右符号自动镜像；地面测试值） |
+| `CA_R2P_K` | 0.5 | 滚转→俯仰力矩混控增益：`τy += τx * CA_R2P_K * side_sign`（左右符号自动镜像）。试飞建议先降到 `0.2`；混控输出硬限幅 `0.15`、淡出阈值 `0.7` 已写死在代码中 |
 
 其他：
 | 参数 | 说明 |
@@ -335,7 +352,7 @@ b0_P = q̄·S·c·Cmδe/Iyy × δe_max ≈ 20 rad/s²   (俯仰: 力臂=弦长 c
 
 滚转/俯仰是两套物理通道（力臂、惯量、舵面效能均不同），所以 b0 分轴给定、数值不同；偏航未换（仍 PID），没有 b0。默认值按 VLM 气动数据 + "力矩指令 ±1 ≈ 全舵面行程（约 ±25°）"估算，实机建议辨识后替换。
 
-ωc 起步值按**极点对标**选取：与原生 PID 速率环的实际闭环极点（约 3~5 rad/s，由气动阻尼与反馈共同决定）相当，便于直接对比替换效果；原仿真初值（10/8）偏激进（其等效比例增益约为原生 `FW_RR_P` 的 20 倍——ADRC 的 P 还需额外承担"抵消气动阻尼"）。空中扫频/阶跃标定后可逐步上调（内环带宽建议 ≥3× 外环，外环约 2.5 rad/s）；若需*单独*增强积分而不动 P，则调 `kWoRatio`。
+ωc 起步值按**极点对标**选取：与原生 PID 速率环的实际闭环极点（约 3~5 rad/s，由气动阻尼与反馈共同决定）相当，便于直接对比替换效果。**当前试飞基线（6.5 节）为仅俯仰 ADRC 开启，`P_B0=2.0`、`P_WC=10.0`；这是本机试飞配置，不是固件默认值（默认 `P_B0=20`、`P_WC=3`）。** 两者的等效比例增益 `ωc/b0` 分别为 5.0 与 0.15，相差约 33 倍；是否合理取决于本机实际 `b0`，不能只比较 `WC`。上式的 `b0_P ≈ 20 rad/s²` 是 VLM 估算，与基线 `2.0` 相差 10 倍——若实际操纵效能确实接近 2 rad/s²，则基线合理；若接近 20，则基线非常激进。建议先用阶跃/扫频辨识 `b0`（单位力矩指令下的角加速度），再决定是否调整 `WC`；空中标定后可逐步调整（内环带宽建议 ≥3× 外环，外环约 2.5 rad/s）。若需*单独*增强积分而不动 P，则调 `kWoRatio`。
 
 **调参**顺序（重要性排序）：
 
@@ -368,7 +385,8 @@ param set UAVCAN_ENABLE 3
 param set UAVCAN_NODE_ID 1
 param set UAVCAN_PUB_FORM 1
 param set FORM_FOLLOWER_EN 0
-param set FORM_YAW_K 0.3
+param set FORM_YAW_K_M 0.3
+param set FORM_YAW_K 0
 
 param set FW_ADRC_P_EN 1
 param set FW_ADRC_P_B0 2.0
@@ -391,8 +409,8 @@ param set FORM_POSITION 1 / 2
 param set FORM_HINGE_K 0.01
 param set FORM_ROLL_AMAX 0.52
 param set FORM_PTCH_AMAX 0.35
-param set FORM_YAW_K 3
-param set CA_R2P_K 0.5
+param set FORM_YAW_K 1.0
+param set CA_R2P_K 0.2
 param set COM_OF_LOSS_T 5.0
 
 param set FW_ADRC_P_EN 1
@@ -407,9 +425,11 @@ reboot
 
 
 说明：
-- 三者作用不同：`FORM_HINGE_K` 为铰链前馈（越小前馈越弱）、`FORM_YAW_K` 为从机转弯外侧增推、`CA_R2P_K` 为分配器滚转→俯仰混控；其中 `CA_R2P_K` 影响最大，若基础跟随尚未单独验证，仍建议按 `0 → 目标值` 逐步加入；
-- `FORM_YAW_K` 主机侧示例显式设为 `0.3`：该参数两侧用途不同（主机=手动偏航同步增推，从机=分配器外侧增推），默认 `3.0` 是按从机效果选取的；
+- 三者作用不同：`FORM_HINGE_K` 为铰链前馈（越小前馈越弱）、`FORM_YAW_K` 为从机转弯外侧增推、`CA_R2P_K` 为分配器滚转→俯仰混控；其中 `CA_R2P_K` 影响最大，首飞建议 `0.2`；混控输出硬限幅 `0.15`、淡出阈值 `0.7` 已写死在代码中；
+- 主机/从机增推已拆分：主机用 `FORM_YAW_K_M`（建议 `0.3`），从机用 `FORM_YAW_K`（首飞建议 `1.0`）；主机侧 `FORM_YAW_K` 不再被读取，建议显式设 `0` 避免误解；
+- `CA_R2P_K` 现在带硬限幅和饱和淡出：滚转力矩接近饱和时混控会自动减小，避免失稳时把俯仰通道推到饱和；
+- `FW_ADRC_P_B0` 当前基线仍是 `2.0`。若要尝试 `10.0`，建议先分档 `2 → 5 → 10`，每次只改这一个量，并用阶跃响应和 `rate_ctrl_status.pitchspeed_integ`（z2）判断 b0 是否匹配；不要与 `FORM_YAW_K`/`CA_R2P_K` 同时改。
 - 从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
 - 主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。
-- 速率内环 LADRC：从机示例已按 `FW_ADRC_R_EN=1` / `FW_ADRC_P_EN=1` 配置（左右从机一起开、保持对称），主机两轴暂为 `0`（保留 PID 作为基准，从机验证通过后可再置 1）；`WC` 起步值按极点对标选取（≈原生速率环极点，见 6.3 节），`B0` 为气动/仿真估算值、建议实机辨识后替换；ωo 固定 4×ωc。
+- 速率内环 LADRC：**当前试飞基线为仅俯仰轴开启**——主机与左右从机均 `FW_ADRC_P_EN=1`、`FW_ADRC_R_EN=0`；俯仰使用 `P_B0=2.0`、`P_WC=10.0`，左右从机保持对称。滚转轴仍为 PID（`FW_R_RMAX` 默认 70°/s）。这套参数是本机试飞基线，不是固件默认值（默认见 6.3 节：`P_B0=20`、`P_WC=3`）；等效比例增益 `ωc/b0` 相差很大，是否合理取决于本机实际 `b0`，建议先用阶跃/扫频辨识 `b0`，再调 `WC`；ωo 固定 4×ωc。
 

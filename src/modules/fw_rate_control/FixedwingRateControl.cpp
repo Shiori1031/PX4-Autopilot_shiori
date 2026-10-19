@@ -51,7 +51,7 @@ FixedwingRateControl::FixedwingRateControl(bool vtol) :
 	_handle_param_vt_fw_difthr_en = param_find("VT_FW_DIFTHR_EN");
 	_handle_param_form_follower_en = param_find("FORM_FOLLOWER_EN");
 	_handle_param_uavcan_pub_form = param_find("UAVCAN_PUB_FORM");
-	_handle_param_form_yaw_k = param_find("FORM_YAW_K");
+	_handle_param_form_yaw_k_m = param_find("FORM_YAW_K_M");
 
 	/* fetch initial parameter values */
 	parameters_update();
@@ -118,8 +118,8 @@ FixedwingRateControl::parameters_update()
 		param_get(_handle_param_uavcan_pub_form, &_param_uavcan_pub_form);
 	}
 
-	if (_handle_param_form_yaw_k != PARAM_INVALID) {
-		param_get(_handle_param_form_yaw_k, &_param_form_yaw_k);
+	if (_handle_param_form_yaw_k_m != PARAM_INVALID) {
+		param_get(_handle_param_form_yaw_k_m, &_param_form_yaw_k_m);
 	}
 
 
@@ -464,8 +464,8 @@ void FixedwingRateControl::Run()
 				 * - UAVCAN_PUB_FORM: 编队控制广播开关，主机发送时应为1
 				 * 先判断推力设定值是不是正常有限数
 				 * 主机侧在固定翼速率控制输出阶段额外叠加一项偏航同步加速：
-				 *   手动类模式: thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K    (杆量 0~1, 保持原行为)
-				 *   自主类模式: thrust += 0.5 * abs(rates_sp.yaw) * FORM_YAW_K  (偏航速率指令 rad/s,
+				 *   手动类模式: thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K_M    (杆量 0~1, 保持原行为)
+				 *   自主类模式: thrust += 0.5 * abs(rates_sp.yaw) * FORM_YAW_K_M  (偏航速率指令 rad/s,
 				 *               直飞≈0, 转弯时按协调转弯速率增推; 非手动时 manual_control_setpoint
 				 *               不再刷新, 不能用杆量)
 				 */
@@ -474,11 +474,11 @@ void FixedwingRateControl::Run()
 				if ((_param_form_follower_en == 0) && (_param_uavcan_pub_form == 1)) {
 					if (_vcontrol_mode.flag_control_manual_enabled) {
 						// 手动类模式: 杆量偏航 (0~1)
-						yaw_boost = 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k;
+						yaw_boost = 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k_m;
 
 					} else {
 						// 自主类模式: 偏航速率指令 [rad/s]
-						yaw_boost = 0.5f * fabsf(_rates_sp.yaw) * _param_form_yaw_k;
+						yaw_boost = 0.5f * fabsf(_rates_sp.yaw) * _param_form_yaw_k_m;
 					}
 				}
 

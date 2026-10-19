@@ -44,6 +44,8 @@
  *                        ż1 = z2 − β1·e + b0·u_prev
  *                        ż2 = −β2·e,        e = z1 − y
  *   SEF + 扰动补偿:      u = (ωc·(r* − z1) + ṙ* − z2) / b0
+ *                        其中 ṙ* / b0 作为微分前馈单独限幅到 ±kFfMax (控制量),
+ *                        避免 b0 偏小或指令翻极时产生巨大尖峰
  *
  * 带宽参数化 (Gao, ACC 2003):  ωo = 4×ωc (固定), β1 = 2ωo, β2 = ωo², kp = ωc
  *
@@ -96,6 +98,7 @@ public:
 private:
 	static constexpr float kTdLambda{40.f};  ///< TD 带宽 [rad/s] (固定, ≈4~5×wc, 接近直通; 如需调整改此常量)
 	static constexpr float kWoRatio{4.f};    ///< 观测器带宽 = 4×控制器带宽 (Gao 建议 3~5×, 固定取 4×)
+	static constexpr float kFfMax{0.3f};     ///< 微分前馈 ṙ*/b0 的控制量限幅 (归一化力矩)
 
 	void updateGains();
 

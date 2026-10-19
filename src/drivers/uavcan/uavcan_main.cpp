@@ -514,6 +514,7 @@ UavcanNode::init(uavcan::NodeID node_id, UAVCAN_DRIVER::BusEvent &bus_events)
 	param_find("FORM_POSITION");
 	param_find("FORM_HINGE_K");
 	param_find("FORM_YAW_K");
+	param_find("FORM_YAW_K_M");
 
 	int ret;
 

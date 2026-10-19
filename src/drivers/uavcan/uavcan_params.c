@@ -605,6 +605,7 @@ PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
  * thrust_body[0] += max(side_sign * yaw_torque, 0) * FORM_YAW_K
  *
  * Only the outer follower of the turn gets the boost (single-sided).
+ * This is the follower-side gain; the master uses FORM_YAW_K_M.
  *
  * @unit norm
  * @min 0.0
@@ -614,4 +615,23 @@ PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
  * @group Formation Control
  */
 PARAM_DEFINE_FLOAT(FORM_YAW_K, 3.0f);
+
+/**
+ * Yaw thrust boost coefficient (master, FixedwingRateControl)
+ *
+ * Additional thrust applied by the master during turns:
+ * thrust_body[0] += 0.5 * abs(yaw_cmd) * FORM_YAW_K_M
+ *
+ * In manual modes yaw_cmd is the normalized yaw stick input; in autonomous
+ * modes it is the yaw rate setpoint [rad/s]. This parameter is separate from
+ * FORM_YAW_K (follower Control Allocator gain).
+ *
+ * @unit norm
+ * @min 0.0
+ * @max 5.0
+ * @decimal 3
+ * @increment 0.1
+ * @group Formation Control
+ */
+PARAM_DEFINE_FLOAT(FORM_YAW_K_M, 0.3f);
 

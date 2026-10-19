@@ -96,7 +96,10 @@ float LADRC1::update(float y, float r, float dt, bool landed)
 	}
 
 	// ③ SEF + ④ 扰动补偿: u = (ωc·(r* − z1) + ṙ* − z2) / b0
-	float u = (_kp * (r_smooth - _z1) + r_dot - _z2) / _b0;
+	// 微分前馈单独限幅: 先按控制量折算到 r_dot 的等效范围 (±kFfMax·b0)，
+	// 再与其余项一起除以 b0；正常小幅前馈不受影响，大指令翻极尖峰被削掉
+	const float r_dot_ff = math::constrain(r_dot, -kFfMax * _b0, kFfMax * _b0);
+	float u = (_kp * (r_smooth - _z1) + r_dot_ff - _z2) / _b0;
 
 	if (!PX4_ISFINITE(u)) {
 		// 异常兜底: 输出清零 + 观测器复位; TD 标记重吸附

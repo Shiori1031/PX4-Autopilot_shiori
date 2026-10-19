@@ -162,10 +162,10 @@ private:
 	int32_t _param_vt_fw_difthr_en{0};
 	param_t _handle_param_form_follower_en{PARAM_INVALID};
 	param_t _handle_param_uavcan_pub_form{PARAM_INVALID};
-	param_t _handle_param_form_yaw_k{PARAM_INVALID};
+	param_t _handle_param_form_yaw_k_m{PARAM_INVALID};
 	int32_t _param_form_follower_en{0};
 	int32_t _param_uavcan_pub_form{0};
-	float _param_form_yaw_k{0.0f};
+	float _param_form_yaw_k_m{0.0f};
 
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::FW_ACRO_X_MAX>) _param_fw_acro_x_max,
