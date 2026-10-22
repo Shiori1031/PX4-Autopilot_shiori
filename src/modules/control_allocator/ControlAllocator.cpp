@@ -454,7 +454,8 @@ ControlAllocator::Run()
 
 			float pitch_mix = c[0](0) * _roll_to_pitch_mix * _side_sign * r2p_scale;
 			pitch_mix = math::constrain(pitch_mix, -kR2PMax, kR2PMax);
-			c[0](1) += pitch_mix;
+			// c[0](1) 是归一化俯仰力矩，正常范围 -1~+1；叠加混控后再做最终限幅，避免向分配器请求超过满权限
+			c[0](1) = math::constrain(c[0](1) + pitch_mix, -1.f, 1.f);
 
 			// 偏航推力补偿
 			c[0](3) = math::constrain(c[0](3) + math::max(_side_sign * c[0](2), 0.f) * _yaw_throttle_gain, 0.f, 1.f);

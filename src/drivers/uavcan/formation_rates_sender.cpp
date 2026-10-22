@@ -87,29 +87,16 @@ void FormationRatesSender::periodic_update(const uavcan::TimerEvent &)
 	msg.roll_rate_target = rates_sp.roll;
 	msg.flags = dronecan::formation::ControlInput::FLAG_VALID;
 
-	// 偏航指令源：手动姿态操纵模式使用速率设定（操纵杆偏航已折算在内），
-	// 自主/半自主模式使用导航解算的偏航速率指令
-	const bool host_in_manual_attitude =
-		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_MANUAL) ||
-		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_STAB) ||
-		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_ACRO) ||
-		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_ALTCTL) ||
-		(status.nav_state == vehicle_status_s::NAVIGATION_STATE_POSCTL);
-
-	if (host_in_manual_attitude) {
-		// yaw: 协调转弯 + 遥控器 的角速率
-		// yaw_sp_move_rate: 固定翼自身链路无生产者，恒 0
-		// 纯手动/自稳：直接使用 rates_sp.yaw（含操纵杆偏航输入）
-		msg.yaw = PX4_ISFINITE(rates_sp.yaw) ? rates_sp.yaw : 0.0f;
-
-	} else if (PX4_ISFINITE(att_sp.yaw_sp_move_rate)) {
-		// 自主/半自主模式：使用导航系统设定的偏航速率
-		msg.yaw = att_sp.yaw_sp_move_rate;
-
-	} else {
-		// 最终回退：优先速率设定
-		msg.yaw = PX4_ISFINITE(rates_sp.yaw) ? rates_sp.yaw : 0.0f;
-	}
+	// 偏航指令源：固定翼链路上唯一的偏航速率指令是 vehicle_rates_setpoint.yaw
+	//   STAB / ALTCTL / POSCTL : 协调转弯 + 偏航杆量      (fw_att_control 生成)
+	//   MISSION 等自主模式      : 协调转弯 tan(roll)*cos(pitch)*g/V (fw_att_control 生成)
+	//   ACRO                    : 杆量偏航速率            (fw_rate_control 生成)
+	// 注意: att_sp.yaw_sp_move_rate 在固定翼链路上没有任何生产者
+	//       (FwLateralLongitudinalControl 只写 q_d 与 thrust_body[0])，恒为 0，
+	//       不能作为自主模式的偏航指令源，否则从机在 MISSION 下收到的偏航指令恒为 0。
+	const bool rates_sp_valid = PX4_ISFINITE(rates_sp.yaw)
+				    && (hrt_elapsed_time(&rates_sp.timestamp) < 500000);
+	msg.yaw = rates_sp_valid ? rates_sp.yaw : 0.0f;
 
 	(void)_publisher.broadcast(msg);
 }

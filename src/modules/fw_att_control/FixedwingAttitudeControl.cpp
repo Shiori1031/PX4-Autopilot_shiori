@@ -383,16 +383,16 @@ void FixedwingAttitudeControl::Run()
 						}
 					}
 
-				/* add yaw rate setpoint from sticks in all attitude-controlled modes */
-				//手动偏航叠加
+//手动偏航角速率叠加, 只在从机stabilized模式下生效, 其他模式由主机指令覆盖
 					if (_vcontrol_mode.flag_control_manual_enabled) {
 						body_rates_setpoint(2) += math::constrain(_manual_control_setpoint.yaw * radians(_param_man_yr_max.get()),
 									  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
 					}
 
-				// 编队从机: 消费主机偏航速率指令 (接收端写入 att_sp.yaw_sp_move_rate)
-				// 铰链约束相对偏航 → 从机偏航速率跟随主机指令, 替换自身协调转弯项(避免双计);
-				// 指令≈0(通道无数据)或本机手动接管时回退原协调转弯逻辑
+// 只在从机offboard模式生效: 消费主机偏航速率指令 (接收端写入 att_sp.yaw_sp_move_rate)
+// 铰链约束相对偏航 → 从机偏航速率跟随主机指令, 替换自身协调转弯项;
+// 指令≈0(通道无数据)或本机手动接管时回退原协调转弯逻辑
+// 用于：c[0](2) = _torque_sp(2); // τz 偏航力矩
 					const float yaw_rate_cmd_ff = _att_sp.yaw_sp_move_rate;
 
 					if ((_param_form_follower_en != 0)

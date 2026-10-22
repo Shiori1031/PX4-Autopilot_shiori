@@ -336,7 +336,6 @@ void FixedwingRateControl::Run()
 			}
 
 			// 控制分配反馈处理（抗饱和）Update saturation status from control allocation feedback
-			// TODO: send the unallocated value directly for better anti-windup
 			Vector3<bool> diffthr_enabled(
 				_param_vt_fw_difthr_en & static_cast<int32_t>(VTOLFixedWingDifferentialThrustEnabledBit::ROLL_BIT),
 				_param_vt_fw_difthr_en & static_cast<int32_t>(VTOLFixedWingDifferentialThrustEnabledBit::PITCH_BIT),
@@ -456,28 +455,23 @@ void FixedwingRateControl::Run()
 					trim.copyTo(_vehicle_torque_setpoint.xyz);
 				}
 
-				/*
-				 * throttle passed through if it is finite, with yaw boost compensation only when
-				 * this vehicle is the leader and the formation publisher is enabled
-				 *
-				 * - FORM_FOLLOWER_EN: 主机0; 从机1
-				 * - UAVCAN_PUB_FORM: 编队控制广播开关，主机发送时应为1
-				 * 先判断推力设定值是不是正常有限数
-				 * 主机侧在固定翼速率控制输出阶段额外叠加一项偏航同步加速：
-				 *   手动类模式: thrust += 0.5 * abs(manual_yaw) * FORM_YAW_K_M    (杆量 0~1, 保持原行为)
-				 *   自主类模式: thrust += 0.5 * abs(rates_sp.yaw) * FORM_YAW_K_M  (偏航速率指令 rad/s,
-				 *               直飞≈0, 转弯时按协调转弯速率增推; 非手动时 manual_control_setpoint
-				 *               不再刷新, 不能用杆量)
-				 */
+/* 主机增推 (仅固定翼, 且仅在本 flag_control_rates_enabled 块内执行)
+* - FORM_FOLLOWER_EN: 主机0; 从机1
+* - UAVCAN_PUB_FORM: 编队控制广播开关，主机发送时应为1
+* 生效模式:
+*   杆量分支 (manual=true, rates=true): STAB / ALTCTL / POSCTL / ACRO
+*   速率分支 (manual=false)          : MISSION / LOITER / RTL / TAKEOFF / LAND / DESCEND / OFFBOARD
+* 不生效: 固定翼 MANUAL (rates=false, 整块被跳过)、TERMINATION (rates=false)
+*/
 				float yaw_boost = 0.f;
 
 				if ((_param_form_follower_en == 0) && (_param_uavcan_pub_form == 1)) {
 					if (_vcontrol_mode.flag_control_manual_enabled) {
-						// 手动类模式: 杆量偏航 (0~1)
+						// STAB模式; MANUAL模式不开
 						yaw_boost = 0.5f * fabsf(_manual_control_setpoint.yaw) * _param_form_yaw_k_m;
 
 					} else {
-						// 自主类模式: 偏航速率指令 [rad/s]
+						// MISSION / OFFBOARD 模式
 						yaw_boost = 0.5f * fabsf(_rates_sp.yaw) * _param_form_yaw_k_m;
 					}
 				}
