@@ -456,8 +456,6 @@ void FixedwingRateControl::Run()
 				}
 
 /* 主机增推 (仅固定翼, 且仅在本 flag_control_rates_enabled 块内执行)
-* - FORM_FOLLOWER_EN: 主机0; 从机1
-* - UAVCAN_PUB_FORM: 编队控制广播开关，主机发送时应为1
 * 生效模式:
 *   杆量分支 (manual=true, rates=true): STAB / ALTCTL / POSCTL / ACRO
 *   速率分支 (manual=false)          : MISSION / LOITER / RTL / TAKEOFF / LAND / DESCEND / OFFBOARD

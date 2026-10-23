@@ -52,7 +52,11 @@
  * 工程要点:
  *  - ESO 使用"实际施加"的控制量 (下游限幅/叠加 trim 后由 setAppliedControl() 写回) → 抗积分饱和
  *  - 首次调用/复位后以当前测量热启动 (z1=y) → 避免初始瞬态
- *  - 非有限值兜底: 测量非有限时保留旧状态, 控制量非有限时清零该拍并触发 TD 重吸附 → NaN 不扩散、可自愈
+ *  - TD/ESO 均为显式欧拉: 内部积分步长按观测器带宽限制 (dt ≤ kMaxDtRatio/ωo),
+ *    陀螺掉帧或 20 ms backup 调度时不会越过稳定边界
+ *  - z2 限幅 (±kZ2MaxRatio·b0): 模型失配/测量噪声下扰动估计不会无限累积
+ *  - 非有限值兜底: 测量非有限时保留旧状态, 控制量非有限时清零该拍并在下一拍重新热启动
+ *    → NaN 不扩散、可自愈
  *
  * 仿真参考实现: docs/reference/LADRC1.m (链翼编队仿真)
  */
@@ -98,12 +102,15 @@ public:
 private:
 	static constexpr float kTdLambda{40.f};  ///< TD 带宽 [rad/s] (固定, ≈4~5×wc, 接近直通; 如需调整改此常量)
 	static constexpr float kWoRatio{4.f};    ///< 观测器带宽 = 4×控制器带宽 (Gao 建议 3~5×, 固定取 4×)
-	static constexpr float kFfMax{0.3f};     ///< 微分前馈 ṙ*/b0 的控制量限幅 (归一化力矩)
+	static constexpr float kFfMax{0.5f};     ///< 微分前馈 ṙ*/b0 的控制量限幅 (归一化力矩)
+	static constexpr float kZ2MaxRatio{3.f}; ///< 扰动估计限幅 = kZ2MaxRatio × b0 [rad/s²]
+	static constexpr float kMaxDtRatio{0.25f}; ///< 内部积分步长上限 = kMaxDtRatio / ωo [s] (显式欧拉稳定域)
+	static constexpr float kMinB0{0.5f};     ///< b0 下限; 低于该值 ωc/b0 会爆炸, 视为非法配置
 
 	void updateGains();
 
 	// 增益
-	float _b0{1.f};      ///< 控制增益
+	float _b0{20.f};     ///< 控制增益 (与 FW_ADRC_P_B0 默认值对齐; 实际值由 setGains() 覆盖)
 	float _wo{40.f};     ///< 观测器带宽 [rad/s] (= 4×_wc, 由 updateGains() 计算)
 	float _wc{10.f};     ///< 控制器带宽 [rad/s]
 
@@ -120,5 +127,4 @@ private:
 
 	// TD 状态 (常开, 带宽固定)
 	float _x1{0.f};       ///< 平滑后指令 r*
-	bool  _snap{true};    ///< 复位后吸附到新指令
 };

@@ -44,7 +44,7 @@
 
 void LADRC1::setGains(float b0, float wc)
 {
-	_b0 = math::max(b0, 0.01f);
+	_b0 = math::max(b0, kMinB0);
 	_wc = math::max(wc, 0.01f);
 
 	updateGains();
@@ -61,22 +61,20 @@ void LADRC1::updateGains()
 
 float LADRC1::update(float y, float r, float dt, bool landed)
 {
-	// 热启动: 首次调用 (或复位后) 观测器从当前测量出发, 避免初始瞬态
+	// 热启动: 首次调用 (或复位后) 观测器从当前测量出发, TD 吸附到当前指令
 	if (!_initialized) {
 		_z1 = y;
 		_x1 = r;
-		_snap = false;
 		_initialized = true;
 	}
 
-	// ① TD: 指令平滑 + 导数前馈 (一阶, 常开)
-	if (_snap) {
-		_x1 = r;
-		_snap = false;
-	}
+	// TD/ESO 均为显式欧拉: dt 过大 (陀螺掉帧、20 ms backup 调度) 时
+	// β1·dt 与 λ·dt 会越过稳定边界, 按观测器带宽限制内部积分步长
+	const float dt_int = math::min(dt, kMaxDtRatio / _wo);
 
+	// ① TD: 指令平滑 + 导数前馈 (一阶, 常开)
 	const float r_dot = kTdLambda * (r - _x1);
-	_x1 += dt * r_dot;
+	_x1 += dt_int * r_dot;
 	const float r_smooth = _x1;
 
 	// ② ESO (2 阶): z1→y, z2→f
@@ -91,27 +89,24 @@ float LADRC1::update(float y, float r, float dt, bool landed)
 
 	} else {
 		const float e = _z1 - y;
-		_z1 += dt * (_z2 - _beta1 * e + _b0 * _u_prev);
-		_z2 += dt * (-_beta2 * e);
+		_z1 += dt_int * (_z2 - _beta1 * e + _b0 * _u_prev);
+		_z2 += dt_int * (-_beta2 * e);
+		// 扰动估计限幅: 模型失配/测量噪声下 z2 会持续累积
+		_z2 = math::constrain(_z2, -kZ2MaxRatio * _b0, kZ2MaxRatio * _b0);
 	}
 
 	// ③ SEF + ④ 扰动补偿: u = (ωc·(r* − z1) + ṙ* − z2) / b0
-	// 微分前馈单独限幅: 先按控制量折算到 r_dot 的等效范围 (±kFfMax·b0)，
+	// 微分前馈单独限幅: 先按控制量折算到 r_dot 的等效范围 (±kFfMax·b0)，超出的部分截断成±kFfMax·b0，
 	// 再与其余项一起除以 b0；正常小幅前馈不受影响，大指令翻极尖峰被削掉
 	const float r_dot_ff = math::constrain(r_dot, -kFfMax * _b0, kFfMax * _b0);
 	float u = (_kp * (r_smooth - _z1) + r_dot_ff - _z2) / _b0;
 
 	if (!PX4_ISFINITE(u)) {
-		// 异常兜底: 输出清零 + 观测器复位; TD 标记重吸附
-		// (指令恢复有限后下一拍自动回正, 防止 NaN 永久锁死该轴)
+		// 异常兜底: 输出清零, 下一拍以当前测量/指令重新热启动
+		// (指令恢复有限后自动回正, 防止 NaN 永久锁死该轴)
 		u = 0.f;
-
-		if (PX4_ISFINITE(y)) {
-			_z1 = y;
-		}
-
 		_z2 = 0.f;
-		_snap = true;
+		_initialized = false;
 	}
 
 	_u_prev = u;   // 默认回写; 下游限幅后由 setAppliedControl() 覆写为实际施加值
@@ -128,9 +123,8 @@ void LADRC1::setAppliedControl(float u_applied)
 
 void LADRC1::reset()
 {
-	// 下一拍 update 以当前测量/指令热启动; TD 吸附到新指令
+	// 下一拍 update 以当前测量/指令热启动 (TD 同时吸附到新指令)
 	_initialized = false;
-	_snap = true;
 	_z2 = 0.f;
 	_u_prev = 0.f;
 }
