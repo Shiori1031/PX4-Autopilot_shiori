@@ -163,9 +163,14 @@ private:
 	param_t _handle_param_form_follower_en{PARAM_INVALID};
 	param_t _handle_param_uavcan_pub_form{PARAM_INVALID};
 	param_t _handle_param_form_yaw_k_m{PARAM_INVALID};
+	param_t _handle_param_form_position{PARAM_INVALID};
 	int32_t _param_form_follower_en{0};
 	int32_t _param_uavcan_pub_form{0};
 	float _param_form_yaw_k_m{0.0f};
+	int32_t _param_form_position{0};
+
+	/**< 从机翼尖位置符号: LEFT = +1, RIGHT = -1, CENTER/未设置 = 0 (不做铰链补偿) */
+	float _side_sign{0.0f};
 
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::FW_ACRO_X_MAX>) _param_fw_acro_x_max,
@@ -224,7 +229,10 @@ private:
 		(ParamFloat<px4::params::FW_ADRC_R_B0>) _param_fw_adrc_r_b0,
 		(ParamFloat<px4::params::FW_ADRC_P_B0>) _param_fw_adrc_p_b0,
 		(ParamFloat<px4::params::FW_ADRC_R_WC>) _param_fw_adrc_r_wc,
-		(ParamFloat<px4::params::FW_ADRC_P_WC>) _param_fw_adrc_p_wc
+		(ParamFloat<px4::params::FW_ADRC_P_WC>) _param_fw_adrc_p_wc,
+
+		// 从机翼尖铰链耦合补偿增益 (原在 ControlAllocator 中使用, 现已移至本模块)
+		(ParamFloat<px4::params::CA_R2P_K>) _param_ca_r2p_k
 	)
 
 	RateControl _rate_control; ///< class for rate control calculations
@@ -244,6 +252,12 @@ private:
 
 	void		vehicle_manual_poll();
 	void		vehicle_land_detected_poll();
+
+	/**
+	 * 从机翼尖铰链耦合补偿: 把部分滚转力矩按 CA_R2P_K 注入俯仰通道 (左右从机符号相反).
+	 * 原实现在 ControlAllocator 中, 移到此处是为了让 LADRC 的 ESO 能看到这一分量.
+	 */
+	void		applyFormationRollToPitchMix();
 
 	float 		get_airspeed_and_update_scaling(float dt);
 };

@@ -580,7 +580,7 @@ PARAM_DEFINE_FLOAT(FORM_HINGE_K, 0.01f);
  * @increment 0.05
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 0.52f);
+PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 1.05f);
 
 /**
  * Maximum follower pitch attitude setpoint magnitude
@@ -595,7 +595,7 @@ PARAM_DEFINE_FLOAT(FORM_ROLL_AMAX, 0.52f);
  * @increment 0.05
  * @group Formation Control
  */
-PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 0.35f);
+PARAM_DEFINE_FLOAT(FORM_PTCH_AMAX, 1.05f);
 
 /**
  * Yaw thrust boost coefficient (follower, Control Allocator)

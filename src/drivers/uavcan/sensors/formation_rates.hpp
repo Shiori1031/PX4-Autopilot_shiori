@@ -96,6 +96,6 @@ private:
 	int32_t _follower_enable{0};
 	int32_t _formation_position{0};
 	float _hinge_gain{0.01f};
-	float _roll_angle_max{0.52f};
-	float _pitch_angle_max{0.35f};
+	float _roll_angle_max{1.05f};   // 60 deg
+	float _pitch_angle_max{1.05f};  // 60 deg
 };

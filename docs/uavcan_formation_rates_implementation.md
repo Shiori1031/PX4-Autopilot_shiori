@@ -2,11 +2,11 @@
 
 ## 1. 功能概述
 
-为 PX4 新增了一套基于 UAVCAN 的编队姿态控制功能，用于三机刚性连接编队飞行系统。当前架构为**"主机发送期望控制姿态 + 从机跟随与铰链修正 + 分配器执行级补偿"**：
+为 PX4 新增了一套基于 UAVCAN 的编队姿态控制功能，用于三机刚性连接编队飞行系统。当前架构为**"主机发送期望控制姿态 + 从机跟随与铰链修正 + 执行级补偿（速率控制层 + 分配器）"**：
 
 - 中央主飞控通过 DroneCAN 广播**主机期望控制姿态**：主机姿态设定（`vehicle_attitude_setpoint.q_d` 反解出的滚转/俯仰角）、期望滚转速率（`vehicle_rates_setpoint.roll`）、推力设定（`att_sp.thrust_body[0]`）与偏航速率指令（统一取 `rates.yaw`，即固定翼速率环的偏航角速率设定）；
 - 左右从飞控按各自 `FORM_POSITION`，把主机期望控制姿态**合成为自身的姿态设定**（跟随主机滚转/俯仰 + 铰链运动学前馈补偿 + 航向保持 + 推力透传），在 Offboard attitude 模式下执行；
-- 从机的 `ControlAllocator` 在力矩分配前做两项执行级补偿：滚转力矩→俯仰通道混控（翼尖铰链结构耦合）、偏航力矩→转弯外侧机增推。
+- 从机在下发执行前做两项执行级补偿：**滚转力矩→俯仰通道混控**（翼尖铰链结构耦合，在 `fw_rate_control` 的速率输出前施加，使 LADRC 的 ESO 可见）、**偏航力矩→转弯外侧机增推**（在 `ControlAllocator` 分配前施加）。详见 4.3 节。
 
 由于指令源是主机的**期望控制姿态（设定值）**而非实测值，主机在手动与自主（AUTO/MISSION 等）模式下都能带动编队飞行；从机与主机控制器接收同一目标，两机各自闭环收敛，天然同步。
 
@@ -28,8 +28,9 @@
 | 自定义消息 | `src/drivers/uavcan/libdronecan/dsdl/dronecan/formation/20040.ControlInput.uavcan` | 定义编队控制广播消息 `thrust/pitch/yaw/roll_target/roll_rate_target/flags` |
 | 主机发送器 | `src/drivers/uavcan/formation_rates_sender.{hpp,cpp}` | 订阅 `vehicle_attitude_setpoint`、`vehicle_rates_setpoint`、`vehicle_status`，把主机期望控制姿态封装后广播 |
 | UAVCAN 接收器 | `src/drivers/uavcan/sensors/formation_rates.{hpp,cpp}` | 接收 `ControlInput`，在从机本地合成姿态设定并发布 `offboard_control_mode` 和 `vehicle_attitude_setpoint` |
-| 分配器定制 | `src/modules/control_allocator/ControlAllocator.{hpp,cpp}` | 从机执行级补偿：滚转→俯仰力矩混控、偏航→外侧机增推 |
-| 参数配置 | `src/drivers/uavcan/uavcan_params.c`、`src/modules/control_allocator/module.yaml` | 定义编队参数（`FORM_*`）与分配器混控增益（`CA_R2P_K`） |
+| 速率控制层定制 | `src/modules/fw_rate_control/FixedwingRateControl.{hpp,cpp}` | 从机滚转→俯仰力矩混控（`CA_R2P_K`）：在速率输出前、`setAppliedControl()` 之前施加，使 LADRC 的 ESO 能观测到该分量；主机偏航同步增推（`FORM_YAW_K_M`） |
+| 分配器定制 | `src/modules/control_allocator/ControlAllocator.{hpp,cpp}` | 从机执行级补偿：偏航力矩→转弯外侧机增推 |
+| 参数配置 | `src/drivers/uavcan/uavcan_params.c`、`src/modules/control_allocator/module.yaml` | 定义编队参数（`FORM_*`）与滚转→俯仰混控增益（`CA_R2P_K`，由 `fw_rate_control` 使用） |
 | 启动接入 | `src/drivers/uavcan/uavcan_main.cpp`、`src/drivers/uavcan/sensors/sensor_bridge.cpp` | 根据参数和板级开关自动初始化发送器/接收器 |
 | 速率内环定制（可选） | `src/modules/fw_rate_control/LADRC1.{hpp,cpp}`、`FixedwingRateControl.cpp`、`fw_rate_control_params.c` | `FW_ADRC_R_EN` / `FW_ADRC_P_EN` 分轴开启时，对应轴速率环由 PID 切换为一阶 LADRC（详见 5.4 与 6.3 节） |
 | 板级配置 | `boards/cuav/7-nano/default.px4board` | 开启 `CONFIG_UAVCAN_FORMATION_RATES_SENDER` 与 `CONFIG_UAVCAN_SENSOR_FORMATION_RATES` |
@@ -87,13 +88,13 @@ matrix::Eulerf euler_sp(q_sp);
 
 ## 4. 当前控制映射关系
 
-控制方式：**主机发送期望控制姿态、从机跟随与铰链修正、分配器执行级补偿**。从机发布 `vehicle_attitude_setpoint` 注入固定翼姿态环，由 `fw_att_control` 继续下发 `vehicle_rates_setpoint` 给速率环；从机的 `ControlAllocator` 在力矩/推力分配前再叠加编队定制。
+控制方式：**主机发送期望控制姿态、从机跟随与铰链修正、执行级补偿**。从机发布 `vehicle_attitude_setpoint` 注入固定翼姿态环，由 `fw_att_control` 继续下发 `vehicle_rates_setpoint` 给速率环；随后在 `fw_rate_control` 内叠加滚转→俯仰混控、在 `ControlAllocator` 分配前叠加外侧增推。
 
 因此：
 - 从机 `roll/pitch` 姿态设定值直接跟随主机的姿态设定（`roll_target / pitch`），从机不再做摇杆重映射；
 - `pitch` 通道额外叠加一项铰链运动学前馈：`side_sign * FORM_HINGE_K * roll_rate_target`，用于补偿编队滚转时的翼尖铰链几何耦合；
 - 从机姿态设定的航向分量保持**自身当前航向**（不接收航向位置指令）；偏航运动由 `yaw_sp_move_rate = msg.yaw` 直接驱动（`FORM_FOLLOWER_EN=1` 时 `fw_att_control` 用它替换自身协调转弯项，见 5.3 节），无有效指令时回退滚转协调转弯；
-- 从机推力直接透传主机推力设定；转弯外侧增推与滚转→俯仰力矩混控均移到 `ControlAllocator` 中完成；
+- 从机推力直接透传主机推力设定；滚转→俯仰力矩混控在 `fw_rate_control` 内完成（速率输出前，见 4.3.1），转弯外侧增推在 `ControlAllocator` 分配前完成（见 4.3.2）；
 - 从机控制链只有在自身飞行模式已经切入 Offboard 时才真正接管。
 
 ### 4.1 从机本地解算
@@ -151,40 +152,54 @@ thrust_body[0]   = constrain(msg.thrust, 0, 1)   # 主机推力直接透传
 - ⚠ **量纲不一致**：杆量分支的 `yaw` 是无量纲杆量（0~1），速率分支的 `yaw` 是 rad/s，同一个 `FORM_YAW_K_M` 在两条分支里含义不同（满杆 ≈ 0.5·K_M，而 0.4 rad/s 的协调转弯 ≈ 0.2·K_M）；
 - ⚠ **自主模式收益有限**：MISSION 下 `thrust_body[0]` 是 TECS 的空速闭环输出，叠加的开环增推会被 TECS 反调抵消（稳态空速不变、积分器被压低），因此该分支只影响过渡瞬态，不建议作为自主模式的"转弯增推"手段。
 
-### 4.3 分配器执行级补偿（从机）
+### 4.3 执行级补偿（从机）
 
-从机 `ControlAllocator` 在控制设定向量 `c = [τx, τy, τz, Tx, Ty, Tz]` 组装完成后、`allocate()` 执行前做两项补偿：
+两项补偿都是在力矩/推力下发前修改设定值，但实现层级不同。
+
+#### 4.3.1 滚转→俯仰混控（`CA_R2P_K`）—— 位于 `fw_rate_control`
+
+```cpp
+// src/modules/fw_rate_control/FixedwingRateControl.cpp
+void FixedwingRateControl::applyFormationRollToPitchMix()
+{
+    if ((_param_form_follower_en == 0) || (fabsf(_side_sign) < FLT_EPSILON)) { return; }
+
+    const float roll_to_pitch_mix = _param_ca_r2p_k.get() * _side_sign;
+
+    _vehicle_torque_setpoint.xyz[1] = math::constrain(_vehicle_torque_setpoint.xyz[1]
+                                      + _vehicle_torque_setpoint.xyz[0] * roll_to_pitch_mix, -1.f, 1.f);
+}
+```
+
+调用点两处（均需 `FORM_FOLLOWER_EN=1` 且 `FORM_POSITION=1/2`，否则不执行）：
+
+| 路径 | 位置 |
+| ---- | ---- |
+| 速率控制（STAB/ALTCTL/POSCTL/ACRO/MISSION/OFFBOARD…） | `control_u + trim` 写入 `vehicle_torque_setpoint` 之后、`_ladrc_pitch.setAppliedControl()` **之前** |
+| 完全手动（固定翼 MANUAL，`rates_enabled=false`） | `vehicle_manual_poll()` 内直接舵量生成之后 |
+
+> ⚠ **位置很关键**：早期实现放在 `ControlAllocator`（下游模块、无反馈回路）。LADRC 的 ESO 只看 `_u_prev`，观测不到这份额外俯仰舵量，会把它当成外部扰动并在 `z2` 中反相抵消——混控把升降舵多推一份，ADRC 又把俯仰力矩拉回去，纯属浪费权限；叠加 `z2` 限幅时抵消不完全，才出现“偏置累积”与“突然回落”的怪现象。移到 `fw_rate_control` 内、`setAppliedControl()` 之前后，ESO 把它计入模型输入，两者不再打架。
+
+数值上与旧实现一致：`c[0](0)` 就等于 `vehicle_torque_setpoint.xyz[0]`，`c[0](1)` 就等于 `xyz[1]`，因此在分配器之外看到的执行结果不变，仅 ESO 的可见性变了。
+
+- `CA_R2P_K`：从机滚转时升降舵联动一个俯仰修正，用于补偿铰链传递的结构耦合载荷；左右符号由 `side_sign` 自动镜像，无需给左右从机分别配置相反系数；
+- 该项为**纯比例混合**，与最终（含 trim 的）滚转力矩设定 `τx` 严格成正比，叠加后仅对最终 `τy` 限幅到 ±1（即不请求超过满权限）；混控量本身不单独限幅，也没有饱和淡出。早期版本曾在 `|τx| > 0.7` 时线性淡出、并将混控输出限幅在 ±0.15，但实测发现这两项恰好在最需要补偿时削弱了补偿（最大可达 3.3 倍），导致从机俯仰响应与主机不匹配，已移除；
+- 若关心是否超权限，观察 `control_allocator_status.unallocated_torque[1]`（长期非零说明应降低 `CA_R2P_K`，而不是把限幅加回来）；
+- 该项由 `FORM_FOLLOWER_EN` 与 `FORM_POSITION` 双重门控：只有 `FORM_FOLLOWER_EN=1` 且 `FORM_POSITION=1/2`（`side_sign≠0`）时才施加。
+
+#### 4.3.2 转弯外侧增推（`FORM_YAW_K`）—— 仍在 `ControlAllocator`
 
 ```cpp
 // src/modules/control_allocator/ControlAllocator.cpp
 if (_is_follower) {
-    // 1) 铰链耦合：把部分滚转力矩引入俯仰通道（左右从机符号相反）
-    //    限幅 + 滚转力矩接近饱和时线性淡出，避免失稳时俯仰通道被放大
-    constexpr float kR2PMax = 0.15f;   // 混控输出硬限幅 (归一化力矩)
-    constexpr float kR2PSat = 0.7f;    // |τx| 超过此值后线性淡出
-    const float roll_torque_abs = fabsf(c[0](0));
-    float r2p_scale = 1.f;
-
-    if (roll_torque_abs > kR2PSat) {
-        r2p_scale = math::constrain((1.f - roll_torque_abs) / (1.f - kR2PSat), 0.f, 1.f);
-    }
-
-    float pitch_mix = c[0](0) * _roll_to_pitch_mix * _side_sign * r2p_scale;
-    pitch_mix = math::constrain(pitch_mix, -kR2PMax, kR2PMax);
-    // 叠加后再做最终限幅，避免向分配器请求超过满权限
-    c[0](1) = math::constrain(c[0](1) + pitch_mix, -1.f, 1.f);
-
-    // 2) 转弯外侧增推：按偏航力矩设定单侧截断叠加推力（只增不减）
+    // 转弯外侧增推：按偏航力矩设定单侧截断叠加推力（只增不减）
     c[0](3) = math::constrain(c[0](3) + math::max(_side_sign * c[0](2), 0.f) * _yaw_throttle_gain, 0.f, 1.f);
 }
 ```
 
-- `_roll_to_pitch_mix` 来自 `CA_R2P_K`（滚转→俯仰混控增益）：从机滚转时升降舵联动一个俯仰修正，用于补偿铰链传递的结构耦合载荷；
-- 混控输出硬限幅为代码内常量 `0.15`：防止俯仰通道被一次性推到饱和；
-- 滚转力矩淡出阈值写死为 `0.7`：`|τx| > 0.7` 后混控线性减小，`|τx|=1` 时完全关闭，避免滚转失稳时继续放大俯仰力矩；
 - `_yaw_throttle_gain` 来自 `FORM_YAW_K`（从机外侧增推系数）：转弯时按从机的偏航力矩设定（`τz`）给**外侧**从机加推（左转时右机增推、右转时左机增推——`side_sign` 与 `τz` 乘积单侧截断自动选出外侧机），内侧机不动作；主机侧改用 `FORM_YAW_K_M`，不再共用该参数；
-- 力矩混控的左右符号由 `side_sign` 自动镜像，无需给左右从机分别配置相反系数；
-- 主机（`FORM_FOLLOWER_EN=0`）下这两项不生效；第二分配实例（多矩阵场景）未包含该定制，当前三机均为单一固定翼有效性矩阵，不受影响。
+- 该补偿需要知道**分配前**的 `τz`，因此仍留在分配器；它由 `_is_follower` 门控（`FORM_FOLLOWER_EN≠0`）；
+- 主机与第二分配实例：主机（`FORM_FOLLOWER_EN=0`）下两项均不生效；多矩阵场景的第二实例（`c[1]`，读 `vehicle_torque_setpoint1`）不含偏航增推，也不含 R2P（R2P 统一在 `fw_rate_control` 侧完成），当前三机均为单一固定翼有效性矩阵，不受影响。
 
 ## 5. 代码流程
 
@@ -234,7 +249,8 @@ FormationRatesBridge
   -> FixedwingAttitudeControl：从 q_d 取 roll/pitch 生成速率设定；
      从机（FORM_FOLLOWER_EN=1）消费 yaw_sp_move_rate → 替换自身协调转弯项（见下方说明）
   -> FixedwingRateControl 生成 vehicle_torque_setpoint / vehicle_thrust_setpoint
-  -> ControlAllocator（从机）：叠加滚转→俯仰混控与外侧增推后解算到舵面/电机
+     （从机）：写出力矩后、setAppliedControl() 前叠加滚转→俯仰混控
+  -> ControlAllocator（从机）：叠加外侧增推后解算到舵面/电机
 ```
 
 注意：`yaw_sp_move_rate` 的消费端已实现（2026-10-09）：`fw_att_control` 姿态分支中，`FORM_FOLLOWER_EN=1` 且收到新鲜指令（`att_sp` 时间戳 <100 ms、非手动接管、`|yaw_sp_move_rate| > 0.01 rad/s`）时，用主机偏航速率指令**替换**自身协调转弯项并发布（限幅 ±`FW_Y_RMAX`）——铰链约束相对偏航（两机偏航速率应一致），且主机指令本身已含其协调转弯分量，故采用替换而非叠加；条件不满足时回退原协调转弯逻辑（行为不变）。从机偏航力矩因此与偏航指令同向，`ControlAllocator` 外侧增推门（`max(side_sign·τz,0)`）在编队机动中可按设计触发；从机姿态设定的航向角分量与 `q_d` 的 yaw 分量仍不被消费（从机保持自身航向）。
@@ -245,7 +261,11 @@ Offboard 丢失保护由 PX4 原生参数 `COM_OF_LOSS_T` 控制，当前实现�
 
 ### 5.4 速率内环 LADRC（可选）
 
-`FW_ADRC_R_EN=1`（滚转）或 `FW_ADRC_P_EN=1`（俯仰）时，`FixedwingRateControl` 的**对应轴速率内环由 PID 切换为一阶线性自抗扰控制（LADRC1）**，两轴可独立开启，偏航轴保持 PID，原 PID 代码完整保留（置 0 即回退）。速率设定值随姿态外环/空速时变，因此控制器含 TD 指令平滑与导数前馈；对链翼构型，翼尖铰链耦合载荷计入"总扰动"，由 ESO 估计并实时抵消，无需显式建模。关联仿真：`docs/reference/LADRC1.m`。
+`FW_ADRC_R_EN=1`（滚转）或 `FW_ADRC_P_EN=1`（俯仰）时，`FixedwingRateControl` 的**对应轴速率内环由 PID 切换为一阶线性自抗扰控制（LADRC1）**，两轴可独立开启，偏航轴保持 PID，原 PID 代码完整保留（置 0 即回退）。速率设定值随姿态外环/空速时变，因此控制器含 TD 指令平滑与导数前馈；对链翼构型，翼尖铰链耦合载荷计入"总扰动"，由 ESO 估计并实时抵消，无需显式建模。
+
+> ⚠ 与从机 R2P 混控的关系：`CA_R2P_K` 引入的滚转→俯仰分量在 `fw_rate_control` 内、**`setAppliedControl()` 之前**就已经计入 `_u_prev`，ESO 把它当作**已知控制量**而不是扰动，不会被 `z2` 反向抵消；只有未被显式建模的残余耦合（真实铰链载荷与 `CA_R2P_K` 设定值之差）才由 `z2` 吸收。若该混控仍留在 `ControlAllocator` 内（本版之前的实现），ESO 看不到它，会把它归入扰动并抵消——这也是把混控上移到速率控制层的原因（见 4.3.1）。
+
+关联仿真：`docs/reference/LADRC1.m`。
 
 ```text
 被控对象 (每个轴, 相对阶 1):   ṗ = f + b0·u
@@ -269,10 +289,11 @@ vehicle_rates_setpoint (rad/s) ─┐
                                 ▼
         LADRC1 (roll / pitch) → 替换 angular_acceleration_setpoint(0/1)
                                 ▼
-        ×空速缩放² → +trim → 限幅 → ControlAllocator → 舵面
+        ×空速缩放² → +trim → 限幅 → [从机: 滚转→俯仰混控 CA_R2P_K] → ControlAllocator → 舵面
         偏航轴: PID 原样
 
 限幅后写回: u_prev = (力矩指令 − trim) / airspeed_scaling²   (ESO 使用实际施加值 → 反饱和)
+注: 从机混控在上述写回**之前**执行, 因此 u_prev 包含混控产生的额外俯仰舵量
 ```
 
 关键工程点：
@@ -280,7 +301,7 @@ vehicle_rates_setpoint (rad/s) ─┐
 - **影子运行**：某轴开关为 0 时该轴 LADRC 仍每拍计算（不接管输出），保证飞行中随时切换无跳变；开关跳变时自动清零对应轴 PID 积分（接管期间该轴 PID 输出被丢弃，积分不清零会在切回瞬间造成力矩突跳）；
 - **反饱和**：ESO 模型输入使用限幅后的"实际施加值"（trim 项由 z2 自适应吸收）；
 - **离散化保护**：TD 与 ESO 均为显式欧拉，内部积分步长按观测器带宽限制为 `dt ≤ kMaxDtRatio/ωo`（`kMaxDtRatio = 0.25`，ωc=10 时约 6.25 ms）→ 陀螺掉帧或 20 ms backup 调度时不会越过稳定边界（正常 ≥250 Hz 采样不受影响）；
-- **扰动估计限幅**：`z2` 限制在 ±`kZ2MaxRatio·b0`（`kZ2MaxRatio = 3`）→ 模型失配、测量噪声时扰动估计不会无限累积；
+- **扰动估计限幅**：`z2` 限制在 ±`kZ2MaxRatio·b0`（`kZ2MaxRatio = 0.5`，即扰动最多等价于 50% 舵量）→ 模型失配、测量噪声时扰动估计不会无限累积，也不会把舵面顶到满行程；
 - **b0 下限**：`setGains()` 将 b0 限制到 ≥ `kMinB0 = 0.5`，避免 b0 误设为 0 时 `ωc/b0` 爆炸；
 - **复位**：`rates_sp.reset_integral`、落地、非固定翼状态、控制量非有限时，ESO/TD 热启动复位（避免初始瞬态）；测量/指令出现非有限值时内部兜底（异常拍输出清零，下一拍以当前测量/指令重新热启动），NaN 不扩散、也不会锁死该轴；
 - **日志**：某轴被接管时，`rate_ctrl_status.rollspeed_integ / pitchspeed_integ` 中对应字段记录该轴的 z2 扰动估计（未接管轴与偏航仍为 PID 积分）；
@@ -314,14 +335,14 @@ vehicle_rates_setpoint (rad/s) ─┐
 | 参数 | 默认 | 说明 |
 | ---- | ---- | ---- |
 | `FORM_HINGE_K` | 0.01 | 铰链修正前馈增益（单位：s）：`pitch += side_sign * FORM_HINGE_K * 主机期望滚转速率`（地面测试值） |
-| `FORM_ROLL_AMAX` | 0.52 | 从机滚转姿态设定限幅（rad） |
-| `FORM_PTCH_AMAX` | 0.35 | 从机俯仰姿态设定限幅（rad，含铰链修正） |
+| `FORM_ROLL_AMAX` | 1.05 | 从机滚转姿态设定限幅（rad，≈60°） |
+| `FORM_PTCH_AMAX` | 1.05 | 从机俯仰姿态设定限幅（rad，≈60°，含铰链修正） |
 | `FORM_YAW_K` | 3.0 | 从机分配器外侧增推系数：`thrust += max(side_sign * τz, 0) * FORM_YAW_K`。试飞建议先从 `1.0` 起（不要用 3.0），确认无“越失稳越增推”后再逐步加；主机侧改用 `FORM_YAW_K_M` |
 
-分配器参数（`Control Allocation` 组，仅从机生效）：
+分配器参数（`Control Allocation` 组，现由 `fw_rate_control` 使用，仅从机生效）：
 | 参数 | 默认 | 说明 |
 | ---- | ---- | ---- |
-| `CA_R2P_K` | 0.5 | 滚转→俯仰力矩混控增益：`τy += τx * CA_R2P_K * side_sign`（左右符号自动镜像）。试飞建议先降到 `0.2`；混控输出硬限幅 `0.15`、淡出阈值 `0.7` 已写死在代码中 |
+| `CA_R2P_K` | 0.5 | 滚转→俯仰力矩混控增益：`τy += τx * CA_R2P_K * side_sign`（左右符号自动镜像，在 `fw_rate_control` 内于 `setAppliedControl()` 之前施加）。试飞建议先降到 `0.2` |
 
 其他：
 | 参数 | 说明 |
@@ -336,10 +357,8 @@ vehicle_rates_setpoint (rad/s) ─┐
 | ---- | ---- | ---- | ---- |
 | `FW_ADRC_R_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管滚转轴 |
 | `FW_ADRC_P_EN` | 0 | — | 0 = PID（默认）；1 = LADRC 接管俯仰轴 |
-
 | `FW_ADRC_R_B0` | 25.0 | rad/s² | 滚转模型增益 b0 |
 | `FW_ADRC_R_WC` | 4.0 | rad/s | 滚转控制器带宽 ωc（闭环极点 −ωc；起步值对标原生 PID 速率环极点） |
-
 | `FW_ADRC_P_B0` | 20.0 | rad/s² | 俯仰模型增益 b0 |
 | `FW_ADRC_P_WC` | 3.0 | rad/s | 俯仰控制器带宽 ωc（起步值对标原生 PID 速率环极点） |
 
@@ -401,8 +420,8 @@ param set FORM_FOLLOWER_EN 1
 param set FORM_POSITION 1 / 2
 
 param set FORM_HINGE_K 0.01
-param set FORM_ROLL_AMAX 0.52
-param set FORM_PTCH_AMAX 0.35
+param set FORM_ROLL_AMAX 1.05
+param set FORM_PTCH_AMAX 1.05
 param set FORM_YAW_K 1.0
 param set CA_R2P_K 0.2
 param set COM_OF_LOSS_T 5.0
@@ -419,9 +438,9 @@ reboot
 
 
 说明：
-- 三者作用不同：`FORM_HINGE_K` 为铰链前馈（越小前馈越弱）、`FORM_YAW_K` 为从机转弯外侧增推、`CA_R2P_K` 为分配器滚转→俯仰混控；其中 `CA_R2P_K` 影响最大，首飞建议 `0.2`；混控输出硬限幅 `0.15`、淡出阈值 `0.7` 已写死在代码中；
+- 三者作用不同：`FORM_HINGE_K` 为铰链前馈（越小前馈越弱）、`FORM_YAW_K` 为从机转弯外侧增推、`CA_R2P_K` 为滚转→俯仰混控（现位于 `fw_rate_control`，在速率输出前施加）；其中 `CA_R2P_K` 影响最大，首飞建议 `0.2`；
 - 主机/从机增推已拆分：主机用 `FORM_YAW_K_M`（建议 `0.3`），从机用 `FORM_YAW_K`（首飞建议 `1.0`）；主机侧 `FORM_YAW_K` 不再被读取，建议显式设 `0` 避免误解；
-- `CA_R2P_K` 现在带硬限幅和饱和淡出：滚转力矩接近饱和时混控会自动减小，避免失稳时把俯仰通道推到饱和；
+- `CA_R2P_K` 当前为**纯比例叠加 + 最终 ±1 硬限幅**（无淡出、无单独限幅）：混控量完全跟随滚转力矩，满权限时可能把俯仰通道推到饱和，因此不应急于加大 `CA_R2P_K`；饱和与否看 `control_allocator_status.unallocated_torque[1]`；
 - `FW_ADRC_P_B0` 基线为 `10.0`（配合 `P_WC=10.0` 时 `ωc/b0 = 1.0`，约 12.5× 原生 `FW_PR_P = 0.08`）。首次试飞建议先分档 `b0 = 20 → 15 → 10`（等效增益 0.5 → 0.67 → 1.0），每次只改这一个量，用阶跃响应和 `rate_ctrl_status.pitchspeed_integ`（ADRC 开启时该字段记录的是 z2 扰动估计，单位 rad/s²，不是速率积分）判断 b0 是否匹配；不要与 `FORM_YAW_K`/`CA_R2P_K` 同时改。
 - 从机进入 Offboard 后，接收器才会继续发布 `vehicle_attitude_setpoint`，由 CAN 控制链正式接管；随后 `FixedwingAttitudeControl` 会继续生成 `vehicle_rates_setpoint` 给速率环。
 - 主机不走从机的 Offboard 控制链，而是在 `FixedwingRateControl.cpp` 内直接对自身推力输出叠加偏航同步加速。

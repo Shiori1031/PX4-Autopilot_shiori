@@ -103,7 +103,7 @@ private:
 	static constexpr float kTdLambda{40.f};  ///< TD 带宽 [rad/s] (固定, ≈4~5×wc, 接近直通; 如需调整改此常量)
 	static constexpr float kWoRatio{4.f};    ///< 观测器带宽 = 4×控制器带宽 (Gao 建议 3~5×, 固定取 4×)
 	static constexpr float kFfMax{0.5f};     ///< 微分前馈 ṙ*/b0 的控制量限幅 (归一化力矩)
-	static constexpr float kZ2MaxRatio{3.f}; ///< 扰动估计限幅 = kZ2MaxRatio × b0 [rad/s²]
+	static constexpr float kZ2MaxRatio{0.5f}; ///< 扰动估计限幅 = kZ2MaxRatio × b0 [rad/s²]（即最多 50% 控制量）
 	static constexpr float kMaxDtRatio{0.25f}; ///< 内部积分步长上限 = kMaxDtRatio / ωo [s] (显式欧拉稳定域)
 	static constexpr float kMinB0{0.5f};     ///< b0 下限; 低于该值 ωc/b0 会爆炸, 视为非法配置
 

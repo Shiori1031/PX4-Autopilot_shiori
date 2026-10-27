@@ -221,14 +221,12 @@ private:
 	bool _is_follower{false};
 	float _side_sign{0.f};
 	float _yaw_throttle_gain{0.f};
-	float _roll_to_pitch_mix{0.f};
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::CA_AIRFRAME>) _param_ca_airframe,
 		(ParamInt<px4::params::CA_METHOD>) _param_ca_method,
 		(ParamInt<px4::params::CA_FAILURE_MODE>) _param_ca_failure_mode,
-		(ParamInt<px4::params::CA_R_REV>) _param_r_rev,
-		(ParamFloat<px4::params::CA_R2P_K>) _param_ca_r2p_k
+		(ParamInt<px4::params::CA_R_REV>) _param_r_rev
 	)
 
 };

@@ -143,8 +143,6 @@ ControlAllocator::parameters_updated()
 	// side_sign: LEFT = +1, RIGHT = -1, CENTER = 0 (no hinge correction)
 	_side_sign = (formation_position == 1) ? 1.f : ((formation_position == 2) ? -1.f : 0.f);
 
-	_roll_to_pitch_mix = _param_ca_r2p_k.get();
-
 	// Allocation method & effectiveness source
 	// Do this first: in case a new method is loaded, it will be configured below
 	bool updated = update_effectiveness_source();
@@ -432,31 +430,17 @@ ControlAllocator::Run()
 		// Set control setpoint vector(s)
 		matrix::Vector<float, NUM_AXES> c[ActuatorEffectiveness::MAX_NUM_MATRICES];
 		c[0](0) = _torque_sp(0); // τx 滚转力矩
-		c[0](1) = _torque_sp(1); // τy 俯仰力矩 _roll_to_pitch_mix\CA_R2P_K
+		c[0](1) = _torque_sp(1); // τy 俯仰力矩 (滚转→俯仰混控已移至 fw_rate_control: CA_R2P_K)
 		c[0](2) = _torque_sp(2); // τz 偏航力矩
 		c[0](3) = _thrust_sp(0); // Tx 前向推力 _yaw_throttle_gain\FORM_YAW_K
 		c[0](4) = _thrust_sp(1); // Ty
 		c[0](5) = _thrust_sp(2); // Tz
 
 		// 从机编队定制（仅从机生效）：
-		// 1) 翼尖铰链耦合补偿：把部分滚转力矩引入俯仰通道，左右从机符号相反
+		// 1) 翼尖铰链耦合补偿：已移至 fw_rate_control 模块实现 (见 CA_R2P_K),
+		//    目的是让 LADRC 的 ESO 能观测到这份额外俯仰舵量
 		// 2) 转弯外侧增推：按偏航力矩设定单侧截断叠加推力（只增不减）
 		if (_is_follower) {
-			// 滚转补偿：限幅 + 滚转力矩接近饱和时线性淡出，避免失稳时把俯仰通道推到饱和
-			constexpr float kR2PMax = 0.15f;   // 混控输出硬限幅 (归一化力矩)
-			constexpr float kR2PSat = 0.7f;    // |τx| 超过此值后线性淡出
-			const float roll_torque_abs = fabsf(c[0](0));
-			float r2p_scale = 1.f;
-
-			if (roll_torque_abs > kR2PSat) {
-				r2p_scale = math::constrain((1.f - roll_torque_abs) / (1.f - kR2PSat), 0.f, 1.f);
-			}
-
-			float pitch_mix = c[0](0) * _roll_to_pitch_mix * _side_sign * r2p_scale;
-			pitch_mix = math::constrain(pitch_mix, -kR2PMax, kR2PMax);
-			// c[0](1) 是归一化俯仰力矩，正常范围 -1~+1；叠加混控后再做最终限幅，避免向分配器请求超过满权限
-			c[0](1) = math::constrain(c[0](1) + pitch_mix, -1.f, 1.f);
-
 			// 偏航推力补偿
 			c[0](3) = math::constrain(c[0](3) + math::max(_side_sign * c[0](2), 0.f) * _yaw_throttle_gain, 0.f, 1.f);
 		}
