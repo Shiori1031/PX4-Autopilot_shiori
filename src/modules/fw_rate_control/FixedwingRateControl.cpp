@@ -52,7 +52,6 @@ FixedwingRateControl::FixedwingRateControl(bool vtol) :
 	_handle_param_form_follower_en = param_find("FORM_FOLLOWER_EN");
 	_handle_param_uavcan_pub_form = param_find("UAVCAN_PUB_FORM");
 	_handle_param_form_yaw_k_m = param_find("FORM_YAW_K_M");
-	_handle_param_form_position = param_find("FORM_POSITION");
 
 	/* fetch initial parameter values */
 	parameters_update();
@@ -123,13 +122,6 @@ FixedwingRateControl::parameters_update()
 		param_get(_handle_param_form_yaw_k_m, &_param_form_yaw_k_m);
 	}
 
-	if (_handle_param_form_position != PARAM_INVALID) {
-		param_get(_handle_param_form_position, &_param_form_position);
-	}
-
-	// 从机翼尖位置符号: LEFT = +1, RIGHT = -1, CENTER = 0 (不做铰链补偿)
-	_side_sign = (_param_form_position == 1) ? 1.f : ((_param_form_position == 2) ? -1.f : 0.f);
-
 	return PX4_OK;
 }
 
@@ -174,32 +166,13 @@ FixedwingRateControl::vehicle_manual_poll()
 				_vehicle_torque_setpoint.xyz[2] = math::constrain(_manual_control_setpoint.yaw * _param_fw_man_y_sc.get() +
 								  _param_trim_yaw.get() * airspeed_scaling_sq, -1.f, 1.f);
 
-				// 完全手动模式: 力矩由杆量直接生成, 同样施加从机铰链耦合补偿 (与原 ControlAllocator 行为一致)
-				// 仅从机生效: FORM_FOLLOWER_EN=1 且翼尖位置已知 (FORM_POSITION = 1 左 / 2 右)
-				if ((_param_form_follower_en != 0) && (fabsf(_side_sign) > FLT_EPSILON)) {
-					applyFormationRollToPitchMix();
-				}
+				// 从机铰链耦合补偿 CA_R2P_K 已上移到 fw_att_control 的速率设定层实现
+				// (速率域: rates_sp.pitch += side_sign * CA_R2P_K * rates_sp.roll), 此处不再处理
 
 				_vehicle_thrust_setpoint.xyz[0] = math::constrain((_manual_control_setpoint.throttle + 1.f) * .5f, 0.f, 1.f);
 			}
 		}
 	}
-}
-
-void
-FixedwingRateControl::applyFormationRollToPitchMix()
-{
-	// 从机翼尖铰链耦合补偿: 把部分滚转力矩按 CA_R2P_K 引入俯仰通道, 左右从机符号相反.
-	// 原先实现在 ControlAllocator 中, 由于分配器在下游模块执行, LADRC 的 ESO (只看 _u_prev)
-	// 观测不到这项额外舵量, 会把它当作外部扰动并在 z2 中反相抵消. 移到本层后 ESO 可见.
-	if ((_param_form_follower_en == 0) || (fabsf(_side_sign) < FLT_EPSILON)) {
-		return;
-	}
-
-	const float roll_to_pitch_mix = _param_ca_r2p_k.get() * _side_sign;
-
-	_vehicle_torque_setpoint.xyz[1] = math::constrain(_vehicle_torque_setpoint.xyz[1]
-					  + _vehicle_torque_setpoint.xyz[0] * roll_to_pitch_mix, -1.f, 1.f);
 }
 
 void
@@ -469,11 +442,6 @@ void FixedwingRateControl::Run()
 // 输出处理
 				if (control_u.isAllFinite()) {
 					matrix::constrain(control_u + trim, -1.f, 1.f).copyTo(_vehicle_torque_setpoint.xyz);
-
-// 从机铰链耦合补偿 CA_R2P_K
-					if ((_param_form_follower_en != 0) && (fabsf(_side_sign) > FLT_EPSILON)) {
-						applyFormationRollToPitchMix();
-					}
 
 // LADRC 反饱和: _u_prev 记录上次输出, 作为积分器反向输入
 					if (!_vehicle_status.is_vtol_tailsitter) {

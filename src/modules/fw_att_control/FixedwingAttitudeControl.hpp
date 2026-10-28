@@ -135,6 +135,9 @@ private:
 
 	param_t _handle_param_form_follower_en{PARAM_INVALID};	/**< 编队从机开关 (FORM_FOLLOWER_EN, 定义于 uavcan_params.c) */
 	int32_t _param_form_follower_en{0};			/**< 编队从机: 消费主机偏航速率指令 (见 Run 姿态分支) */
+	param_t _handle_param_form_position{PARAM_INVALID};	/**< 编队位置 (FORM_POSITION, 定义于 uavcan_params.c) */
+	int32_t _param_form_position{0};
+	float _side_sign{0.f};					/**< 翼尖位置符号: LEFT=+1, RIGHT=-1, CENTER=0 */
 
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::FW_AIRSPD_MAX>) _param_fw_airspd_max,
@@ -162,7 +165,10 @@ private:
 		(ParamFloat<px4::params::FW_WR_P>) _param_fw_wr_p,
 
 		(ParamFloat<px4::params::FW_Y_RMAX>) _param_fw_y_rmax,
-		(ParamFloat<px4::params::FW_MAN_YR_MAX>) _param_man_yr_max
+		(ParamFloat<px4::params::FW_MAN_YR_MAX>) _param_man_yr_max,
+
+		// 从机翼尖铰链耦合: 滚转速率 → 俯仰速率前馈 (原在 fw_rate_control 的力矩域实现)
+		(ParamFloat<px4::params::CA_R2P_K>) _param_ca_r2p_k
 
 	)
 

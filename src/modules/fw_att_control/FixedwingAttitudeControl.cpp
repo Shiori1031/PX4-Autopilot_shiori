@@ -88,6 +88,7 @@ FixedwingAttitudeControl::FixedwingAttitudeControl(bool vtol) :
 	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle"))
 {
 	_handle_param_form_follower_en = param_find("FORM_FOLLOWER_EN");
+	_handle_param_form_position = param_find("FORM_POSITION");
 
 	/* fetch initial parameter values */
 	parameters_update();
@@ -131,6 +132,13 @@ FixedwingAttitudeControl::parameters_update()
 	if (_handle_param_form_follower_en != PARAM_INVALID) {
 		param_get(_handle_param_form_follower_en, &_param_form_follower_en);
 	}
+
+	// 翼尖位置符号: LEFT = +1, RIGHT = -1, CENTER = 0 (不做铰链补偿)
+	if (_handle_param_form_position != PARAM_INVALID) {
+		param_get(_handle_param_form_position, &_param_form_position);
+	}
+
+	_side_sign = (_param_form_position == 1) ? 1.f : ((_param_form_position == 2) ? -1.f : 0.f);
 }
 
 void
@@ -401,6 +409,19 @@ void FixedwingAttitudeControl::Run()
 					    && (fabsf(yaw_rate_cmd_ff) > 0.01f)) {
 						body_rates_setpoint(2) = math::constrain(yaw_rate_cmd_ff,
 										  -radians(_param_fw_y_rmax.get()), radians(_param_fw_y_rmax.get()));
+					}
+
+// 从机翼尖铰链耦合: 滚转速率 → 俯仰速率前馈 (CA_R2P_K, 左右从机符号相反)
+					// 放在速率设定层 (而非力矩域) 的好处: 不占用力矩权限、不参与 ±1 限幅,
+					// 且俯仰 LADRC 的 ESO 输入 (_u_prev) 只含它自己的输出 → 两者真正解耦.
+					// ACRO 模式不经过本模块 (rates_sp 由 fw_rate_control 发布), 因此不做补偿.
+					if ((_param_form_follower_en != 0) && (fabsf(_side_sign) > FLT_EPSILON)) {
+						const float pitch_rate_ff = _side_sign * _param_ca_r2p_k.get() * body_rates_setpoint(0);
+						const float pitch_rate_max_pos = radians(_param_fw_p_rmax_pos.get());
+						const float pitch_rate_max_neg = radians(_param_fw_p_rmax_neg.get());
+
+						body_rates_setpoint(1) = math::constrain(body_rates_setpoint(1) + pitch_rate_ff,
+									-pitch_rate_max_neg, pitch_rate_max_pos);
 					}
 
 					// Tailsitter: transform from FW to hover frame (all interfaces are in hover (body) frame)
